@@ -4086,6 +4086,32 @@ async function newVersion(id){
   }catch(e){ /* el toast de error ya se mostró */ }
 }
 
+// Duplica la cotización abierta en una oferta NUEVA: copia cliente, ítems y
+// condiciones, pero arranca su propia línea de referencia (número propio,
+// versión 01). Distinto de newVersion(), que conserva el número y sube la
+// versión de la MISMA oferta.
+// El número no se pide acá sino al guardar, igual que en una cotización nueva:
+// así no queda un hueco en la numeración si se vuelve sin guardar.
+function duplicateQuote(id){
+  const base = DB.quotes.find(x=>x.id===id);
+  if(!base){ toast('Guardá la cotización antes de duplicarla.'); return; }
+  const copia = JSON.parse(JSON.stringify(base));
+  copia.id = null;             // registro nuevo en la base (uuid propio)
+  copia.seq = null;            // número nuevo: lo asigna saveQuote
+  copia.version = 1;           // línea nueva → arranca en la versión 01
+  copia.ref = '(se asigna al guardar)';
+  copia.state = 'borrador';
+  copia.dateISO = todayISO();
+  copia.created = Date.now();
+  // Lo que NO se hereda: es una oferta distinta, no una revisión de la original.
+  copia.fechaEnvio = null;     // el envío pertenece a la original
+  copia.sharepointUrl = null;  // que se cree su propia carpeta (ventas)
+  copia.fromOppId = null;      // no robarle la oportunidad de origen a la original
+  CUR = copia;
+  renderEditor(true);
+  toast('Copia lista: editá lo que haga falta y guardá para asignarle número');
+}
+
 // Elimina la cotización abierta. Borra solo la VERSIÓN que se está viendo.
 // Avisa y desvincula si está enlazada a una oportunidad o cobranza.
 async function delQuote(id){
@@ -4136,6 +4162,7 @@ function renderEditor(isNew){
   setHeader(isNew?'Nueva cotización':'Editar cotización', CUR.ref,
     `<button class="btn ghost" onclick="go('${volverView}')">← Volver</button>
      ${(!isNew && CUR.id)?`<button class="btn ghost" onclick="newVersion('${CUR.id}')">${ICO.copy||ICO.plus} Nueva versión</button>`:''}
+     ${(!isNew && CUR.id)?`<button class="btn ghost" onclick="duplicateQuote('${CUR.id}')" title="Crea una oferta NUEVA (número propio, versión 01) copiando cliente, ítems y condiciones. Distinto de 'Nueva versión', que mantiene el número de esta oferta.">${ICO.doc||ICO.plus} Duplicar</button>`:''}
      ${(!isNew && CUR.id)?`<button class="btn danger" onclick="delQuote('${CUR.id}')">Eliminar</button>`:''}
      ${(CUR.unidad==='ventas' && CUR.id)?`<button class="btn ghost" onclick="abrirCarpetaSP()" title="${CUR.sharepointUrl?'Abrir la carpeta del proyecto en SharePoint':'Crear la carpeta del proyecto en SharePoint'}">📁 ${CUR.sharepointUrl?'Carpeta SharePoint':'Crear carpeta SharePoint'}</button>`:''}
      ${(CUR.unidad==='ventas' && CUR.id)?`<button class="btn ghost" onclick="abrirArchivosSP()" title="Ver y subir archivos del proyecto en SharePoint">🗂️ Archivos</button>`:''}
@@ -4664,7 +4691,7 @@ async function initAuth(){
 }
 
 /* ================= START ================= */
-window.newQuote=newQuote; window.editQuote=editQuote; window.newVersion=newVersion; window.toggleGroup=toggleGroup; window.clientForm=clientForm;
+window.newQuote=newQuote; window.editQuote=editQuote; window.newVersion=newVersion; window.duplicateQuote=duplicateQuote; window.toggleGroup=toggleGroup; window.clientForm=clientForm;
 window.saveClient=saveClient; window.delClient=delClient; window.addCat=addCat; window.delCat=delCat;
 window.addItem=addItem; window.delItem=delItem; window.saveQuote=saveQuote; window.printQuote=printQuote;
 window.go=go; window.closeModal=closeModal; window.setQuoteState=setQuoteState; window.dashSelect=dashSelect;
