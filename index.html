@@ -776,6 +776,11 @@ const SB = {
   listGestiones: () => sbFetch('/gestiones_cobranza?select=*&order=fecha.desc'),
   addGestion:    (g) => sbFetch('/gestiones_cobranza', {method:'POST', body: JSON.stringify(g)}).then(r=>r[0]),
   delGestion:    (id) => sbFetch('/gestiones_cobranza?id=eq.'+id, {method:'DELETE', prefer:'return=minimal'}),
+  // ---- Agenda: tareas cargadas a mano ----
+  listTareas:  () => sbFetch('/agenda_tareas?select=*&order=fecha.asc'),
+  addTarea:    (t) => sbFetch('/agenda_tareas', {method:'POST', body: JSON.stringify(t)}).then(r=>r[0]),
+  updTarea:    (id,t) => sbFetch('/agenda_tareas?id=eq.'+id, {method:'PATCH', body: JSON.stringify(t)}),
+  delTarea:    (id) => sbFetch('/agenda_tareas?id=eq.'+id, {method:'DELETE', prefer:'return=minimal'}),
   // ---- Audit trail (log automático por triggers de Supabase) ----
   // Devuelve las últimas N filas del log, o filtra por registro concreto.
   listAudit:   (limit=100) => sbFetch('/audit_log?select=*&order=cambiado_en.desc&limit='+limit),
@@ -968,6 +973,21 @@ function pagoToRow(p){
   };
 }
 // ---- Gestiones de cobranza (bitácora) ----
+function rowToTarea(r){
+  return {
+    id:r.id, titulo:r.titulo||'', detalle:r.detalle||'', fecha:r.fecha||'', hora:r.hora||'',
+    asignadoA:r.asignado_a||'', estado:r.estado||'pendiente', prioridad:r.prioridad||'media',
+    creadoPor:r.creado_por||'', created:r.created_at?Date.parse(r.created_at):Date.now()
+  };
+}
+function tareaToRow(t){
+  return {
+    titulo:(t.titulo||'').trim(), detalle:(t.detalle||'').trim()||null,
+    fecha:t.fecha||null, hora:(t.hora||'').trim()||null,
+    asignado_a:t.asignadoA||null, estado:t.estado||'pendiente', prioridad:t.prioridad||'media',
+    creado_por:t.creadoPor||null, updated_at:new Date().toISOString()
+  };
+}
 function rowToGestion(r){
   return {
     id:r.id, cobranzaId:r.cobranza_id||'', fecha:r.fecha||'',
@@ -989,10 +1009,13 @@ function uid(){ return Math.random().toString(36).slice(2,10); }
 
 // Recarga todo el estado desde Supabase hacia DB
 async function reloadDB(){
-  const [clients, catalog, quotes, seq, opps, acts, cobranzas, pagos, adicionales, gestiones, cierres] = await Promise.all([
+  const [clients, catalog, quotes, seq, opps, acts, cobranzas, pagos, adicionales, gestiones, cierres, tareas] = await Promise.all([
     SB.listClients(), SB.listCatalog(), SB.listQuotes(), SB.peekSeq(), SB.listOpps(), SB.listActs(),
     SB.listCobranzas().catch(()=>[]), SB.listPagos().catch(()=>[]), SB.listAdicionales().catch(()=>[]),
-    SB.listGestiones().catch(()=>[]), SB.listCierres().catch(()=>[])
+    SB.listGestiones().catch(()=>[]), SB.listCierres().catch(()=>[]),
+    // Si todavía no se corrió la migración de agenda_tareas, la app sigue
+    // andando: la Agenda simplemente no muestra tareas propias.
+    SB.listTareas().catch(()=>[])
   ]);
   DB.clients = clients.map(rowToClient);
   DB.catalog = catalog.map(rowToCat);
@@ -1005,6 +1028,7 @@ async function reloadDB(){
   DB.adicionales = adicionales.map(rowToAdicional);
   DB.gestiones = gestiones.map(rowToGestion);
   DB.cierres = Array.isArray(cierres) ? cierres : [];
+  DB.tareas  = (Array.isArray(tareas) ? tareas : []).map(rowToTarea);
   SB_READY = true;
 }
 
@@ -4968,10 +4992,12 @@ function graficasCierres(unidad){
 // propias con su tablero son la etapa siguiente.
 const AGENDA_OPP_ABIERTAS = ['nuevo','borrador','enviada','negociacion'];
 const AGENDA_TIPOS = {
+  tarea:   { lbl:'Tarea',           color:'#7b5ea7' },
   paso:    { lbl:'Próximo paso',    color:'#5f7a4e' },
   limite:  { lbl:'Fecha límite',    color:'#b3853a' },
   validez: { lbl:'Vence la oferta', color:'#4a6b86' },
 };
+const AGENDA_PRIORIDADES = ['alta','media','baja'];
 let agendaVista    = 'lista';   // 'lista' | 'calendario'
 let agendaSoloMias = true;      // filtro "Mis pendientes"
 let agendaMesRef   = null;      // {y,m} del mes que se mira en calendario
@@ -5025,6 +5051,14 @@ function _vencimientoValidez(q){
 // Arma la lista completa de vencimientos a partir de lo que ya hay en DB.
 function agendaItems(){
   const out = [];
+  // Tareas cargadas a mano. Las ya hechas no se muestran: la agenda es lo que
+  // falta hacer, no un historial.
+  (DB.tareas||[]).forEach(t=>{
+    if(t.estado==='hecha' || !t.fecha) return;
+    out.push({ fecha:t.fecha, hora:t.hora||'', tipo:'tarea', titulo:t.titulo,
+               contexto:t.detalle||'', persona:t.asignadoA||'', ref:'',
+               prioridad:t.prioridad||'media', accion:"tareaForm('"+t.id+"')" });
+  });
   (DB.opps||[]).forEach(o=>{
     if(!AGENDA_OPP_ABIERTAS.includes(o.state)) return;
     const quien = o.comercial||'';
@@ -5053,6 +5087,75 @@ function agendaDe(items, persona){
   const n = _normNom(persona);
   return items.filter(i=> _normNom(i.persona)===n);
 }
+// Alta/edición de una tarea propia. `fechaSugerida` llega cuando se hace click
+// en un día del calendario, para no tener que volver a tipear la fecha.
+function tareaForm(id, fechaSugerida){
+  const t = id ? (DB.tareas||[]).find(x=>x.id===id) : null;
+  const yo = comercialActual();
+  const d = t || { titulo:'', detalle:'', fecha:(fechaSugerida||todayISO()), hora:'',
+                   asignadoA:(yo||''), estado:'pendiente', prioridad:'media' };
+  const quienes = COMERCIALES.map(c=>
+    `<option value="${esc(c)}" ${c===d.asignadoA?'selected':''}>${esc(c)}</option>`).join('');
+  const prios = AGENDA_PRIORIDADES.map(p=>
+    `<option value="${p}" ${p===d.prioridad?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('');
+  openModal(t?'Editar tarea':'Nueva tarea', `
+    <div class="field"><label>Qué hay que hacer</label>
+      <input id="tk_tit" value="${esc(d.titulo)}" placeholder="Ej: Llamar a Rebuilding por el lote 2"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field"><label>Fecha</label><input id="tk_fec" type="date" value="${esc(d.fecha)}"></div>
+      <div class="field"><label>Hora (opcional)</label><input id="tk_hor" type="time" value="${esc(d.hora)}"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field"><label>Asignada a</label>
+        <select id="tk_asg"><option value="">— sin asignar —</option>${quienes}</select></div>
+      <div class="field"><label>Prioridad</label><select id="tk_pri">${prios}</select></div>
+    </div>
+    <div class="field"><label>Detalle (opcional)</label><textarea id="tk_det">${esc(d.detalle)}</textarea></div>
+    ${!comercialActual()?'<div class="help">Ojo: no pude identificarte como comercial, así que la tarea arranca sin asignar. Elegí a quién le toca.</div>':''}
+  `, `${t?`<button class="btn danger" onclick="borrarTarea('${t.id}')">Eliminar</button>`:''}
+     ${t?`<button class="btn ghost" onclick="marcarTareaHecha('${t.id}')">Marcar hecha</button>`:''}
+     <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="guardarTarea(${t?"'"+t.id+"'":'null'})">Guardar</button>`);
+  setTimeout(()=>{ const el=document.getElementById('tk_tit'); if(el) el.focus(); }, 60);
+}
+async function guardarTarea(id){
+  const tit = val('tk_tit').trim();
+  if(!tit){ toast('Poné al menos qué hay que hacer'); return; }
+  const fecha = val('tk_fec');
+  if(!fecha){ toast('Falta la fecha'); return; }
+  const row = tareaToRow({
+    titulo:tit, detalle:val('tk_det'), fecha, hora:val('tk_hor'),
+    asignadoA:val('tk_asg'), prioridad:val('tk_pri'),
+    estado:(id && (DB.tareas||[]).find(x=>x.id===id) || {}).estado || 'pendiente',
+    creadoPor:_emailActual()
+  });
+  try{
+    if(id) await SB.updTarea(id, row); else await SB.addTarea(row);
+    await reloadDB();
+    closeModal(); toast(id?'Tarea actualizada':'Tarea agendada');
+    if(current==='agenda') VIEWS.agenda(); else refreshCurrent();
+  }catch(e){
+    toast('No se pudo guardar: '+e.message+'. ¿Se corrió la migración de agenda_tareas?');
+  }
+}
+async function marcarTareaHecha(id){
+  try{
+    await SB.updTarea(id, {estado:'hecha', updated_at:new Date().toISOString()});
+    await reloadDB(); closeModal(); toast('Tarea marcada como hecha');
+    if(current==='agenda') VIEWS.agenda();
+  }catch(e){ toast('No se pudo actualizar: '+e.message); }
+}
+async function borrarTarea(id){
+  if(!confirm('¿Eliminar esta tarea? No se puede deshacer.')) return;
+  try{
+    await SB.delTarea(id);
+    await reloadDB(); closeModal(); toast('Tarea eliminada');
+    if(current==='agenda') VIEWS.agenda();
+  }catch(e){ toast('No se pudo eliminar: '+e.message); }
+}
+window.tareaForm=tareaForm; window.guardarTarea=guardarTarea;
+window.marcarTareaHecha=marcarTareaHecha; window.borrarTarea=borrarTarea;
+
 function ensureAgendaStyles(){
   if(document.getElementById('agendaStyles')) return;
   const st = document.createElement('style');
@@ -5107,7 +5210,7 @@ function _agItemHTML(it){
       <div class="tt">${esc(it.titulo)}</div>
       ${it.contexto?`<div class="cx">${esc(it.contexto)}</div>`:''}
       <div class="mt"><span class="ag-tag" style="background:${t.color}">${t.lbl}</span>
-        &nbsp;${cuando}${it.persona?' · '+esc(it.persona):''}${it.ref?' · '+esc(it.ref):''}</div>
+        &nbsp;${cuando}${it.hora?' · '+esc(it.hora)+' hs':''}${it.prioridad==='alta'?' · <b style="color:#b0584f">Prioridad alta</b>':''}${it.persona?' · '+esc(it.persona):''}${it.ref?' · '+esc(it.ref):''}</div>
     </div>
   </div>`;
 }
@@ -5132,7 +5235,8 @@ function _agCalendario(items){
       return `<span class="ag-chip" style="background:${t.color}" title="${esc(i.titulo)}${i.contexto?' — '+esc(i.contexto):''}" onclick="event.stopPropagation();${i.accion}">${esc(i.titulo)}</span>`;
     }).join('');
     const mas = list.length>3 ? `<div class="ag-more">+${list.length-3} más</div>` : '';
-    celdas.push(`<div class="ag-cell ${delMes?'':'off'} ${esHoy?'today':''}"><div class="n">${d.getDate()}</div>${chips}${mas}</div>`);
+    // Click en el día → nueva tarea con esa fecha ya puesta.
+    celdas.push(`<div class="ag-cell ${delMes?'':'off'} ${esHoy?'today':''}" title="Agendar una tarea el ${fechaDMY(iso)}" onclick="tareaForm(null,'${iso}')"><div class="n">${d.getDate()}</div>${chips}${mas}</div>`);
   }
   const dows = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(x=>`<div class="dow">${x}</div>`).join('');
   return `<div class="ag-cal">${dows}${celdas.join('')}</div>`;
@@ -5159,7 +5263,8 @@ VIEWS.agenda = function(){
     `<div class="ag-seg">
        <button class="${agendaVista==='lista'?'on':''}" onclick="agendaSetVista('lista')">Lista</button>
        <button class="${agendaVista==='calendario'?'on':''}" onclick="agendaSetVista('calendario')">Calendario</button>
-     </div>`);
+     </div>
+     <button class="btn" onclick="tareaForm(null)">${ICO.plus} Nueva tarea</button>`);
 
   const filtro = yo
     ? `<div class="ag-seg">
