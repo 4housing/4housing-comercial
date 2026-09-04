@@ -5197,6 +5197,10 @@ function ensureAgendaStyles(){
     .ag-cell.today{border-color:var(--olive);box-shadow:0 0 0 1px var(--olive) inset}
     .ag-cell .n{font-size:11.5px;font-weight:700;color:#37432c;margin-bottom:3px}
     .ag-chip{display:block;font-size:10.5px;line-height:1.25;color:#fff;border-radius:4px;padding:2px 5px;margin-bottom:3px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .ag-chip-ok{display:inline-block;width:13px;height:13px;line-height:12px;text-align:center;margin-right:4px;
+      border:1px solid rgba(255,255,255,.65);border-radius:3px;font-size:10px;color:transparent;vertical-align:-2px}
+    .ag-chip:hover .ag-chip-ok{color:#fff;background:rgba(255,255,255,.22)}
+    .ag-chip-ok:hover{background:#fff !important;color:#37432c !important}
     .ag-more{font-size:10px;color:var(--muted)}
     .ag-empty{background:#fff;border:1px dashed #ddd9cc;border-radius:10px;padding:26px;text-align:center;color:var(--muted);font-size:13px}
     .ag-check{flex:none;align-self:center;width:24px;height:24px;border-radius:50%;border:2px solid #c9c5b4;background:#fff;cursor:pointer;padding:0;position:relative}
@@ -5261,7 +5265,11 @@ function _agCalendario(items){
     const list = porDia[iso]||[];
     const chips = list.slice(0,3).map(i=>{
       const t = AGENDA_TIPOS[i.tipo]||{color:'#888'};
-      return `<span class="ag-chip" style="background:${t.color}" title="${esc(i.titulo)}${i.contexto?' — '+esc(i.contexto):''}" onclick="event.stopPropagation();${i.accion}">${esc(i.titulo)}</span>`;
+      // Las tareas propias se pueden marcar hechas acá mismo, sin abrirlas.
+      const tick = i.tareaId
+        ? `<span class="ag-chip-ok" title="Marcar como hecha" onclick="event.stopPropagation();marcarTareaHecha('${i.tareaId}')">✓</span>`
+        : '';
+      return `<span class="ag-chip" style="background:${t.color}" title="${esc(i.titulo)}${i.contexto?' — '+esc(i.contexto):''}" onclick="event.stopPropagation();${i.accion}">${tick}${esc(i.titulo)}</span>`;
     }).join('');
     const mas = list.length>3 ? `<div class="ag-more">+${list.length-3} más</div>` : '';
     // Click en el día → nueva tarea con esa fecha ya puesta.
