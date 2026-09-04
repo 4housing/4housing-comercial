@@ -516,6 +516,10 @@ textarea.inp{resize:vertical;min-height:60px;}
         Cobranzas
       </button>
       <div class="nav-group-lbl">Comercial</div>
+      <button class="navbtn" data-view="agenda">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="17" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/><path d="M8 14h3M8 17.5h6"/></svg>
+        Agenda
+      </button>
       <button class="navbtn" data-view="opps">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="4" height="16" rx="1"/><rect x="10" y="4" width="4" height="11" rx="1"/><rect x="17" y="4" width="4" height="7" rx="1"/></svg>
         Oportunidades
@@ -4956,6 +4960,269 @@ function graficasCierres(unidad){
   if(unidad==='ventas') cards.push(_chartCard('Pipeline por mes (USD)', _svgArea(s.map(x=>({label:L(x.periodo), value:(x.ind.pipeline_usd!=null?x.ind.pipeline_usd:null)})), {color:'#BA7517', fmt:_fmtC})+'<div class="help" style="font-size:11px;margin-top:2px">Solo desde el primer cierre real.</div>'));
   return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">'+cards.join('')+'</div>';
 }
+/* ================= AGENDA ================= */
+// Unifica en una sola vista los vencimientos comerciales que hoy viven repartidos
+// por el CRM: el próximo paso de cada oportunidad, su fecha límite, y el
+// vencimiento de validez de las ofertas enviadas.
+// NO agrega tablas: es otra lectura de datos que ya están cargados. Las tareas
+// propias con su tablero son la etapa siguiente.
+const AGENDA_OPP_ABIERTAS = ['nuevo','borrador','enviada','negociacion'];
+const AGENDA_TIPOS = {
+  paso:    { lbl:'Próximo paso',    color:'#5f7a4e' },
+  limite:  { lbl:'Fecha límite',    color:'#b3853a' },
+  validez: { lbl:'Vence la oferta', color:'#4a6b86' },
+};
+let agendaVista    = 'lista';   // 'lista' | 'calendario'
+let agendaSoloMias = true;      // filtro "Mis pendientes"
+let agendaMesRef   = null;      // {y,m} del mes que se mira en calendario
+
+// Compara nombres sin depender de tildes ni mayúsculas: Azure AD devuelve el
+// nombre para mostrar y suele venir sin acentos ("Ignacio Sanchez Moser"),
+// mientras que COMERCIALES los tiene.
+function _normNom(s){
+  return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/\s+/g,' ').trim();
+}
+// Qué comercial es el usuario logueado, o null si no se lo puede identificar.
+// Sin esto no hay "mis pendientes": el filtro se desactiva y se avisa.
+function comercialActual(){
+  try{
+    const meta = (AUTH_USER && AUTH_USER.user_metadata) || {};
+    for(const cand of [meta.name, meta.full_name, meta.preferred_username]){
+      if(!cand) continue;
+      const hit = COMERCIALES.find(x=> _normNom(x)===_normNom(cand));
+      if(hit) return hit;
+    }
+    // Los mails son nombre+apellido pegados: ignaciosanchez@4housing.com.ar
+    const usr = _normNom(((AUTH_USER&&AUTH_USER.email)||'').split('@')[0]).replace(/[^a-z]/g,'');
+    if(usr.length>=6){
+      const hit = COMERCIALES.find(x=> _normNom(x).replace(/[^a-z]/g,'').startsWith(usr));
+      if(hit) return hit;
+    }
+  }catch(_){}
+  return null;
+}
+// Días desde hoy hasta una fecha ISO. Negativo = ya pasó. null si no se entiende.
+function _diasHasta(iso){
+  const p = _parseFecha(iso); if(!p) return null;
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  return Math.round((new Date(p.y,p.m-1,p.d).getTime() - hoy.getTime())/86400000);
+}
+function _isoDe(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+// Cuándo vence la validez de una oferta: fecha de la oferta + los días que diga
+// el campo "validez", que es texto libre ("30 días."). Si no se puede leer un
+// número no se inventa nada: esa oferta simplemente no entra a la agenda.
+function _vencimientoValidez(q){
+  const p = _parseFecha(q.dateISO); if(!p) return null;
+  const m = /(\d{1,3})/.exec(String(q.validez||'')); if(!m) return null;
+  const dias = parseInt(m[1],10);
+  if(!(dias>0) || dias>365) return null;
+  const d = new Date(p.y, p.m-1, p.d); d.setDate(d.getDate()+dias);
+  return _isoDe(d);
+}
+// Arma la lista completa de vencimientos a partir de lo que ya hay en DB.
+function agendaItems(){
+  const out = [];
+  (DB.opps||[]).forEach(o=>{
+    if(!AGENDA_OPP_ABIERTAS.includes(o.state)) return;
+    const quien = o.comercial||'';
+    const cliente = (typeof oppClientName==='function' ? oppClientName(o) : '') || o.title || '';
+    if(o.proximoPaso && o.proximoPasoFecha){
+      out.push({ fecha:o.proximoPasoFecha, tipo:'paso', titulo:o.proximoPaso,
+                 contexto:cliente, persona:quien, ref:o.ref||'', accion:"openOpp('"+o.id+"')" });
+    }
+    if(o.fechaLimite){
+      out.push({ fecha:o.fechaLimite, tipo:'limite', titulo:'Cierre previsto de la oportunidad',
+                 contexto:cliente, persona:quien, ref:o.ref||'', accion:"openOpp('"+o.id+"')" });
+    }
+  });
+  (DB.quotes||[]).forEach(q=>{
+    if(q.state!=='enviada') return;
+    const v = _vencimientoValidez(q); if(!v) return;
+    out.push({ fecha:v, tipo:'validez', titulo:'Vence la validez de la oferta',
+               contexto:q.client||'', persona:q.comercial||'', ref:q.ref||'',
+               accion:"editQuote('"+q.id+"')" });
+  });
+  return out.sort((a,b)=> a.fecha<b.fecha ? -1 : a.fecha>b.fecha ? 1 : 0);
+}
+// Los que le tocan a una persona (comparando sin tildes).
+function agendaDe(items, persona){
+  if(!persona) return items;
+  const n = _normNom(persona);
+  return items.filter(i=> _normNom(i.persona)===n);
+}
+function ensureAgendaStyles(){
+  if(document.getElementById('agendaStyles')) return;
+  const st = document.createElement('style');
+  st.id = 'agendaStyles';
+  st.textContent = `
+    .ag-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+    .ag-seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:9px;overflow:hidden}
+    .ag-seg button{background:#fff;border:none;padding:8px 14px;font-size:12.5px;font-weight:600;color:var(--olive-deep);cursor:pointer;font-family:inherit}
+    .ag-seg button.on{background:var(--olive-deep);color:#fff}
+    .ag-grp{margin-bottom:18px}
+    .ag-grp-h{display:flex;align-items:baseline;gap:9px;margin-bottom:8px}
+    .ag-grp-h .t{font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#37432c}
+    .ag-grp-h .n{font-size:11.5px;color:var(--muted)}
+    .ag-item{display:flex;align-items:flex-start;gap:11px;background:#fff;border:1px solid #e4e1d5;border-left-width:4px;border-radius:9px;padding:11px 13px;margin-bottom:7px;cursor:pointer}
+    .ag-item:hover{background:var(--cream)}
+    .ag-item .d{flex:none;width:52px;text-align:center}
+    .ag-item .d .dd{font-size:17px;font-weight:700;color:#37432c;line-height:1.05}
+    .ag-item .d .mm{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+    .ag-item .b{min-width:0;flex:1}
+    .ag-item .b .tt{font-size:13.5px;font-weight:600;color:#37432c;word-break:break-word}
+    .ag-item .b .cx{font-size:12px;color:#5f5c52;margin-top:2px;word-break:break-word}
+    .ag-item .b .mt{font-size:11px;color:var(--muted);margin-top:4px}
+    .ag-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:20px;color:#fff}
+    .ag-vencido{color:#b0584f;font-weight:700}
+    .ag-hoy{color:#b3853a;font-weight:700}
+    .ag-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+    .ag-cal .dow{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;text-align:center;padding-bottom:4px}
+    .ag-cell{min-height:92px;background:#fff;border:1px solid #e4e1d5;border-radius:8px;padding:5px 6px}
+    .ag-cell.off{background:#f6f5ef;border-style:dashed}
+    .ag-cell.today{border-color:var(--olive);box-shadow:0 0 0 1px var(--olive) inset}
+    .ag-cell .n{font-size:11.5px;font-weight:700;color:#37432c;margin-bottom:3px}
+    .ag-chip{display:block;font-size:10.5px;line-height:1.25;color:#fff;border-radius:4px;padding:2px 5px;margin-bottom:3px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .ag-more{font-size:10px;color:var(--muted)}
+    .ag-empty{background:#fff;border:1px dashed #ddd9cc;border-radius:10px;padding:26px;text-align:center;color:var(--muted);font-size:13px}
+  `;
+  document.head.appendChild(st);
+}
+function _agItemHTML(it){
+  const p = _parseFecha(it.fecha);
+  const dias = _diasHasta(it.fecha);
+  const t = AGENDA_TIPOS[it.tipo] || {lbl:it.tipo, color:'#888'};
+  let cuando = '';
+  if(dias!=null){
+    if(dias<0)       cuando = `<span class="ag-vencido">Vencido hace ${Math.abs(dias)} día${Math.abs(dias)===1?'':'s'}</span>`;
+    else if(dias===0)cuando = `<span class="ag-hoy">Vence hoy</span>`;
+    else if(dias===1)cuando = 'Mañana';
+    else             cuando = `En ${dias} días`;
+  }
+  return `<div class="ag-item" style="border-left-color:${t.color}" onclick="${it.accion}">
+    <div class="d"><div class="dd">${p?String(p.d).padStart(2,'0'):'--'}</div><div class="mm">${p?MESES[p.m-1].slice(0,3):''}</div></div>
+    <div class="b">
+      <div class="tt">${esc(it.titulo)}</div>
+      ${it.contexto?`<div class="cx">${esc(it.contexto)}</div>`:''}
+      <div class="mt"><span class="ag-tag" style="background:${t.color}">${t.lbl}</span>
+        &nbsp;${cuando}${it.persona?' · '+esc(it.persona):''}${it.ref?' · '+esc(it.ref):''}</div>
+    </div>
+  </div>`;
+}
+function _agCalendario(items){
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const ref = agendaMesRef || {y:hoy.getFullYear(), m:hoy.getMonth()+1};
+  const primero = new Date(ref.y, ref.m-1, 1);
+  // La semana arranca en lunes (getDay(): domingo=0)
+  const corr = (primero.getDay()+6)%7;
+  const inicio = new Date(ref.y, ref.m-1, 1-corr);
+  const porDia = {};
+  items.forEach(i=>{ (porDia[i.fecha] = porDia[i.fecha] || []).push(i); });
+  const celdas = [];
+  for(let k=0;k<42;k++){
+    const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate()+k);
+    const iso = _isoDe(d);
+    const delMes = (d.getMonth()===ref.m-1);
+    const esHoy  = (iso===_isoDe(hoy));
+    const list = porDia[iso]||[];
+    const chips = list.slice(0,3).map(i=>{
+      const t = AGENDA_TIPOS[i.tipo]||{color:'#888'};
+      return `<span class="ag-chip" style="background:${t.color}" title="${esc(i.titulo)}${i.contexto?' — '+esc(i.contexto):''}" onclick="event.stopPropagation();${i.accion}">${esc(i.titulo)}</span>`;
+    }).join('');
+    const mas = list.length>3 ? `<div class="ag-more">+${list.length-3} más</div>` : '';
+    celdas.push(`<div class="ag-cell ${delMes?'':'off'} ${esHoy?'today':''}"><div class="n">${d.getDate()}</div>${chips}${mas}</div>`);
+  }
+  const dows = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(x=>`<div class="dow">${x}</div>`).join('');
+  return `<div class="ag-cal">${dows}${celdas.join('')}</div>`;
+}
+function agendaMes(delta){
+  const hoy = new Date();
+  const ref = agendaMesRef || {y:hoy.getFullYear(), m:hoy.getMonth()+1};
+  const d = new Date(ref.y, ref.m-1+delta, 1);
+  agendaMesRef = {y:d.getFullYear(), m:d.getMonth()+1};
+  VIEWS.agenda();
+}
+function agendaSetVista(v){ agendaVista=v; VIEWS.agenda(); }
+function agendaToggleMias(v){ agendaSoloMias=v; VIEWS.agenda(); }
+window.agendaMes=agendaMes; window.agendaSetVista=agendaSetVista; window.agendaToggleMias=agendaToggleMias;
+
+VIEWS.agenda = function(){
+  ensureAgendaStyles();
+  const yo = comercialActual();
+  const todos = agendaItems();
+  const mias  = (yo && agendaSoloMias) ? agendaDe(todos, yo) : todos;
+  const venc  = todos.filter(i=> (_diasHasta(i.fecha)||0) < 0).length;
+
+  setHeader('Agenda', yo ? ('Tus vencimientos comerciales, '+yo) : 'Vencimientos comerciales del equipo',
+    `<div class="ag-seg">
+       <button class="${agendaVista==='lista'?'on':''}" onclick="agendaSetVista('lista')">Lista</button>
+       <button class="${agendaVista==='calendario'?'on':''}" onclick="agendaSetVista('calendario')">Calendario</button>
+     </div>`);
+
+  const filtro = yo
+    ? `<div class="ag-seg">
+         <button class="${agendaSoloMias?'on':''}" onclick="agendaToggleMias(true)">Mis pendientes</button>
+         <button class="${!agendaSoloMias?'on':''}" onclick="agendaToggleMias(false)">Todo el equipo</button>
+       </div>`
+    : `<div class="help">No pude identificarte como comercial, así que se muestra todo el equipo.
+        Tu usuario es <b>${esc((AUTH_USER&&AUTH_USER.email)||'?')}</b> y no coincide con ninguno de la lista de comerciales.</div>`;
+
+  let cuerpo = '';
+  if(agendaVista==='calendario'){
+    const hoy = new Date();
+    const ref = agendaMesRef || {y:hoy.getFullYear(), m:hoy.getMonth()+1};
+    cuerpo = `<div class="ag-bar">
+        <button class="btn ghost" onclick="agendaMes(-1)">←</button>
+        <div style="font-size:14px;font-weight:700;color:#37432c;min-width:170px;text-align:center">${MESES[ref.m-1]} ${ref.y}</div>
+        <button class="btn ghost" onclick="agendaMes(1)">→</button>
+      </div>${_agCalendario(mias)}`;
+  } else {
+    const grupos = [
+      {t:'Vencidos',      f:d=> d<0},
+      {t:'Hoy',           f:d=> d===0},
+      {t:'Mañana',        f:d=> d===1},
+      {t:'Próximos 7 días',f:d=> d>1 && d<=7},
+      {t:'Más adelante',  f:d=> d>7},
+    ];
+    cuerpo = grupos.map(g=>{
+      const items = mias.filter(i=>{ const d=_diasHasta(i.fecha); return d!=null && g.f(d); });
+      if(!items.length) return '';
+      return `<div class="ag-grp"><div class="ag-grp-h"><span class="t">${g.t}</span><span class="n">${items.length}</span></div>
+        ${items.map(_agItemHTML).join('')}</div>`;
+    }).join('');
+    if(!cuerpo) cuerpo = `<div class="ag-empty">No hay vencimientos cargados${(yo&&agendaSoloMias)?' a tu nombre':''}.<br>
+      <span style="font-size:12px">La agenda se arma con los próximos pasos y fechas límite de las oportunidades, y con la validez de las ofertas enviadas.</span></div>`;
+  }
+
+  C().innerHTML = `<div class="ag-bar">${filtro}
+      <div class="help" style="margin-left:auto">${mias.length} vencimiento(s)${venc?` · <span class="ag-vencido">${venc} vencido(s) en el equipo</span>`:''}</div>
+    </div>${cuerpo}`;
+};
+
+// Cartel de recordatorio al abrir la app: solo lo vencido o de hoy, solo del
+// usuario identificado, y una sola vez por día para no volverse molesto.
+function recordatoriosAlAbrir(){
+  try{
+    const yo = comercialActual(); if(!yo) return;
+    const clave = 'ag_recordatorio_'+_normNom(yo).replace(/\s/g,'_');
+    if(localStorage.getItem(clave)===todayISO()) return;
+    const mios = agendaDe(agendaItems(), yo)
+      .filter(i=>{ const d=_diasHasta(i.fecha); return d!=null && d<=0; });
+    if(!mios.length) return;
+    ensureAgendaStyles();
+    const vencidos = mios.filter(i=> _diasHasta(i.fecha)<0).length;
+    openModal('Tenés '+mios.length+' pendiente'+(mios.length===1?'':'s'),
+      `<div class="help" style="margin-bottom:12px">${vencidos?`<span class="ag-vencido">${vencidos} vencido(s)</span> y `:''}${mios.length-vencidos} para hoy.</div>`
+      + mios.slice(0,8).map(_agItemHTML).join('')
+      + (mios.length>8?`<div class="help">…y ${mios.length-8} más en la Agenda.</div>`:''),
+      `<button class="btn ghost" onclick="closeModal()">Después</button>
+       <button class="btn" onclick="closeModal();go('agenda')">Ver la agenda</button>`);
+    localStorage.setItem(clave, todayISO());
+  }catch(_){ /* un recordatorio nunca debe romper el arranque de la app */ }
+}
+
 VIEWS.cierres = function(){
   setHeader('Cierres mensuales','Registro histórico de indicadores comerciales');
   const html = `
@@ -5008,6 +5275,7 @@ VIEWS.cierres = function(){
     await reloadDB();
     try{ await cerrarMesesPendientes(); }catch(_){ /* el cierre es best-effort, no debe romper el arranque */ }
     go('dashboard');
+    recordatoriosAlAbrir(); // avisa lo vencido/de hoy al comercial logueado (1 vez por día)
   }catch(e){
     if(c) c.innerHTML = '<div class="empty"><div style="font-weight:600;color:#b4554e">No se pudo conectar con la base de datos</div>'
       + '<div style="margin-top:6px">'+esc(e.message)+'</div>'
