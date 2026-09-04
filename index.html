@@ -5058,7 +5058,8 @@ function agendaItems(){
     if(t.estado==='hecha' || !t.fecha) return;
     out.push({ fecha:t.fecha, hora:t.hora||'', tipo:'tarea', titulo:t.titulo,
                contexto:t.detalle||'', persona:t.asignadoA||'', ref:'',
-               prioridad:t.prioridad||'media', accion:"tareaForm('"+t.id+"')" });
+               prioridad:t.prioridad||'media', tareaId:t.id,
+               accion:"tareaForm('"+t.id+"')" });
   });
   (DB.opps||[]).forEach(o=>{
     if(!AGENDA_OPP_ABIERTAS.includes(o.state)) return;
@@ -5198,6 +5199,10 @@ function ensureAgendaStyles(){
     .ag-chip{display:block;font-size:10.5px;line-height:1.25;color:#fff;border-radius:4px;padding:2px 5px;margin-bottom:3px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .ag-more{font-size:10px;color:var(--muted)}
     .ag-empty{background:#fff;border:1px dashed #ddd9cc;border-radius:10px;padding:26px;text-align:center;color:var(--muted);font-size:13px}
+    .ag-check{flex:none;align-self:center;width:24px;height:24px;border-radius:50%;border:2px solid #c9c5b4;background:#fff;cursor:pointer;padding:0;position:relative}
+    .ag-check:hover{border-color:var(--olive);background:#f2f5ec}
+    .ag-check::after{content:"";position:absolute;left:7px;top:3px;width:6px;height:11px;border:solid #5f7a4e;border-width:0 2.5px 2.5px 0;transform:rotate(45deg);opacity:0}
+    .ag-check:hover::after{opacity:1}
     .ag-join{background:#6264a7;color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
     .ag-join:hover{background:#4f5194}
     .ag-aviso{background:#fdf6ec;border:1px solid #e8d9bd;border-radius:9px;padding:10px 13px;font-size:12.5px;color:#7a6440;margin-bottom:12px;line-height:1.5}
@@ -5221,7 +5226,13 @@ function _agItemHTML(it){
   const unirse = it.joinUrl
     ? `<button class="btn sm ag-join" onclick="event.stopPropagation();window.open('${it.joinUrl.replace(/'/g,'%27')}','_blank')">Unirse</button>`
     : '';
+  // Marcar hecha en un solo click, sin abrir la tarea: es la acción más frecuente.
+  const check = it.tareaId
+    ? `<button class="ag-check" title="Marcar como hecha" aria-label="Marcar como hecha"
+         onclick="event.stopPropagation();marcarTareaHecha('${it.tareaId}')"></button>`
+    : '';
   return `<div class="ag-item" style="border-left-color:${t.color}" onclick="${it.accion}">
+    ${check}
     <div class="d"><div class="dd">${p?String(p.d).padStart(2,'0'):'--'}</div><div class="mm">${p?MESES[p.m-1].slice(0,3):''}</div></div>
     ${unirse?`<div style="order:3;flex:none;align-self:center">${unirse}</div>`:''}
     <div class="b">
