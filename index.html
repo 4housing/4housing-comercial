@@ -5153,7 +5153,7 @@ async function marcarTareaHecha(id){
     await reloadDB(); toast('Tarea marcada como hecha');
     // Si se marcó desde el cartel de recordatorio, se vuelve a dibujar con lo que
     // queda (y se cierra solo si no quedó nada) en vez de cerrarse de golpe.
-    if(_recordatorioAbierto) recordatoriosAlAbrir(); else closeModal();
+    if(_recordatorioAbierto) recordatoriosAlAbrir(true); else closeModal();
     if(current==='agenda') VIEWS.agenda();
   }catch(e){ toast('No se pudo actualizar: '+e.message); }
 }
@@ -5481,26 +5481,53 @@ window.conectarCalendario=conectarCalendario; window.desconectarCalendario=desco
 let _recordatorioAbierto = false;
 function cerrarRecordatorio(){ _recordatorioAbierto=false; closeModal(); }
 window.cerrarRecordatorio=cerrarRecordatorio;
-function recordatoriosAlAbrir(){
+// El cartel se muestra UNA vez por día. Lo que no caduca es la tarea: mientras
+// no se marque hecha sigue entrando al cartel todos los días, por más que su
+// fecha ya haya pasado (el filtro toma todo lo que vence hoy o antes).
+// `redibujar` saltea el tope: se usa cuando el cartel ya está abierto y se marcó
+// algo, para volver a dibujarlo con lo que queda.
+async function recordatoriosAlAbrir(redibujar){
   try{
     const yo = comercialActual(); if(!yo) return;
-    // Las reuniones quedan afuera: son reuniones, no pendientes. El cartel es
-    // para lo que hay que hacer y está vencido o vence hoy.
-    const mios = agendaDe(agendaItems(), yo)
-      .filter(i=> i.tipo!=='reunion')
-      .filter(i=>{ const d=_diasHasta(i.fecha); return d!=null && d<=0; });
+    const clave = 'ag_recordatorio_'+_normNom(yo).replace(/\s/g,'_');
+    let visto = null; try{ visto = localStorage.getItem(clave); }catch(_){}
+    if(!redibujar && visto===todayISO()) return;
+    // Las reuniones solo están cargadas si ya se visitó la Agenda. Al arrancar la
+    // app hay que traerlas, si no el cartel nunca las mostraría.
+    if(!redibujar){
+      try{ await agendaAutoConectar(); if(CAL_CONECTADO) await agendaSyncReuniones(); }catch(_){}
+    }
+    // El cartel es SOLO tareas y reuniones. La validez de una oferta, la fecha
+    // límite y el próximo paso de una oportunidad no entran: no son cosas que uno
+    // "hace y tacha", se resuelven en su propia pantalla.
+    const mios = agendaDe(agendaItems(), yo).filter(i=>{
+      const d = _diasHasta(i.fecha);
+      if(d==null) return false;
+      if(i.tipo==='tarea')   return d<=0;   // vencida o de hoy: insiste hasta marcarla
+      if(i.tipo==='reunion') return d===0;  // solo las de hoy: una reunión pasada ya no es un pendiente
+      return false;
+    });
     // Si ya no queda nada (p.ej. se marcó hecha la última desde el propio cartel),
     // el cartel se cierra solo.
     if(!mios.length){ if(_recordatorioAbierto) cerrarRecordatorio(); return; }
     ensureAgendaStyles();
-    const vencidos = mios.filter(i=> _diasHasta(i.fecha)<0).length;
-    openModal('Tenés '+mios.length+' pendiente'+(mios.length===1?'':'s'),
-      `<div class="help" style="margin-bottom:12px">${vencidos?`<span class="ag-vencido">${vencidos} vencido(s)</span> y `:''}${mios.length-vencidos} para hoy.</div>`
+    const tareas   = mios.filter(i=> i.tipo==='tarea');
+    const reunion  = mios.filter(i=> i.tipo==='reunion');
+    const vencidas = tareas.filter(i=> _diasHasta(i.fecha)<0).length;
+    const partes = [];
+    if(tareas.length)  partes.push(tareas.length+' pendiente'+(tareas.length===1?'':'s'));
+    if(reunion.length) partes.push(reunion.length+' reunión'+(reunion.length===1?'':'es')+' hoy');
+    const detalle = [];
+    if(vencidas)                detalle.push(`<span class="ag-vencido">${vencidas} vencida${vencidas===1?'':'s'}</span>`);
+    if(tareas.length-vencidas)  detalle.push((tareas.length-vencidas)+' para hoy');
+    openModal('Tenés '+partes.join(' y '),
+      (detalle.length?`<div class="help" style="margin-bottom:12px">${detalle.join(' · ')}</div>`:'')
       + mios.slice(0,8).map(_agItemHTML).join('')
       + (mios.length>8?`<div class="help">…y ${mios.length-8} más en la Agenda.</div>`:''),
       `<button class="btn ghost" onclick="cerrarRecordatorio()">Después</button>
        <button class="btn" onclick="cerrarRecordatorio();go('agenda')">Ver la agenda</button>`);
     _recordatorioAbierto = true;
+    try{ localStorage.setItem(clave, todayISO()); }catch(_){}
   }catch(_){ /* un recordatorio nunca debe romper el arranque de la app */ }
 }
 
