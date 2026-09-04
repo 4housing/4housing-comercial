@@ -27,13 +27,27 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
 ## Stack
 
 - **Frontend:** un solo archivo `index.html` (vanilla JS/HTML/CSS, sin frameworks).
-- **Hosting:** GitHub Pages, org `labo-comercial`, repo `4housing-comercial`.
-  URL pública: https://labo-comercial.github.io/4housing-comercial/
+- **Hosting:** GitHub Pages, org `4housing`, repo `4housing-comercial`.
+  URL pública: https://4housing.github.io/4housing-comercial/
+  (El repo se mudó de la org `labo-comercial`; el dominio viejo puede servir una
+  versión desactualizada. Si un cambio "no aparece", chequear la URL además de
+  la caché del navegador.)
 - **Backend:** Supabase (REST API + Edge Functions + RLS).
   Project ID: `wcpkpwxhqdcdljfwzcmy`
-- **Auth:** Azure AD vía MSAL v3.7.0 embebido (CDN discontinuado), restringido a
-  cuentas organizacionales.
-  Client ID: `66a475e3-745f-4931-8085-ee71a0b6d6fe`
+- **Auth — OJO, hay DOS caminos distintos y conviene no confundirlos:**
+  1. **Login de la app: Supabase Auth con proveedor Azure**
+     (`sbClient.auth.signInWithOAuth({provider:'azure'})`, scopes
+     `openid profile email`). De acá sale `AUTH_USER`, y **cada llamada REST a
+     Supabase viaja con el JWT del usuario**, así que las políticas RLS
+     distinguen usuarios (ver `public.tiene_sector('fhcomercial')`, que existe
+     en la base pero NO está en el repo).
+  2. **MSAL v3.7.0 embebido (`msal-browser.min.js`): solo para Microsoft
+     Graph**, con una app registrada aparte (`f47da2c5-7922-4e2f-8648-51b8486552fb`).
+     Lo usan SharePoint (`Files.ReadWrite.All`, `Sites.ReadWrite.All`) y el
+     calendario de la Agenda (`Calendars.Read`). El token se pide con
+     `_spToken(interactivo, scopes)`; **solo se cachea en `_spTok` cuando son los
+     scopes de SharePoint** — meter ahí un token de otro scope rompe SharePoint.
+  Client ID del login: `66a475e3-745f-4931-8085-ee71a0b6d6fe`
   Tenant ID: `c408b6d8-ae0b-4d30-9056-da52e18116c4`
 - **ERP:** Tango Delta 5 (Axoft), servidor local accesible desde internet.
   API usa headers `ApiAuthorization` (token) y `Company: 3`.
@@ -68,6 +82,23 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
    `authenticated`.
 8. **Nada de credenciales sensibles hardcodeadas más allá de lo ya aceptado**
    (la anon key de Supabase es pública por diseño; el token de Tango NO).
+9. **No romper nada de lo que ya funciona. Es la regla que manda sobre todas
+   las demás.** Llegar al estado actual costó mucho trabajo; una feature nueva
+   nunca justifica degradar una que ya anda. En la práctica:
+   - **Preferir agregar antes que modificar.** Una vista nueva, una función
+     nueva, una tabla nueva son de bajo riesgo. Tocar una función que ya usa
+     otra parte de la app es de alto riesgo, aunque el cambio parezca trivial.
+   - **Si hay que tocar código compartido, buscar primero TODOS los usos**
+     (`grep`) y entender qué depende de él. Ejemplo real: `_spToken()` cacheaba
+     el token en la global `_spTok`; agregarle el calendario sin cuidado habría
+     hecho fallar con 403 las carpetas de SharePoint de Ventas, que ya andaban.
+   - **Probar lo que se tocó, no solo lo que se agregó.** `node --check` valida
+     sintaxis, no comportamiento. Si el cambio afecta algo existente, hay que
+     verificar que eso existente siga funcionando.
+   - **Un PR por feature, chico y reversible.** Si algo sale mal en producción,
+     tiene que poder revertirse solo, sin arrastrar lo demás.
+   - **Ante la duda, preguntar antes de tocar.** Es preferible una consulta de
+     más que una regresión.
 
 ## Flujo de trabajo en git (dos personas, mismo repo)
 
@@ -98,6 +129,27 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
 
 ## Estado actual (features completadas)
 
+- **Agenda** (menú Comercial): vista de lista y calendario mensual que unifica
+  vencimientos. Junta cuatro fuentes: tareas propias (tabla `agenda_tareas`,
+  se cargan a mano desde el botón o clickeando un día), próximo paso y fecha
+  límite de oportunidades, validez de ofertas enviadas, y las reuniones de
+  Outlook/Teams vía Graph (opt-in, con botón "Unirse"). Filtro "Mis pendientes"
+  y cartel de recordatorio al abrir (1 vez por día, solo lo vencido/de hoy).
+  - El usuario se identifica comparando el nombre de Azure AD contra
+    `COMERCIALES` **ignorando tildes** (Azure devuelve "Ignacio Sanchez Moser",
+    la lista tiene "Ignacio Sánchez Moser"), con respaldo por el usuario del
+    mail. Si no matchea, no adivina: muestra todo el equipo y avisa.
+  - "Mis pendientes" es comodidad visual, **no** barrera de seguridad.
+- **Duplicar cotización**: copia una OE en una oferta nueva (número propio,
+  versión 01). Distinto de "Nueva versión". No hereda fecha de envío, carpeta
+  de SharePoint ni la oportunidad de origen (copiar `fromOppId` le robaría la
+  OP a la original al guardar).
+- **Impresión**: en `@media print` hay una regla que oculta **todo** hijo directo
+  de `<body>` salvo `.app`, `#catPrintLayer` y `#edcPrintLayer` (era la única
+  forma de tapar el botón flotante de `/portal/nav.js`, que vive en un shadow
+  DOM). Trampa a tener presente: **si algún día se agrega un elemento nuevo a
+  nivel de `<body>` que SÍ deba imprimirse, hay que sumarlo a esa lista** o no
+  va a salir en el PDF, sin ningún error visible.
 - Pipeline Kanban, log de actividades con próximo paso, audit trail parcial
   (tabla `audit_log`, `fn_audit()`). Triggers confirmados funcionando (con
   registros reales) en `oportunidades` y `cotizaciones`. Los triggers en
