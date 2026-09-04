@@ -4992,6 +4992,7 @@ function graficasCierres(unidad){
 // propias con su tablero son la etapa siguiente.
 const AGENDA_OPP_ABIERTAS = ['nuevo','borrador','enviada','negociacion'];
 const AGENDA_TIPOS = {
+  reunion: { lbl:'Reunión',         color:'#6264a7' },
   tarea:   { lbl:'Tarea',           color:'#7b5ea7' },
   paso:    { lbl:'Próximo paso',    color:'#5f7a4e' },
   limite:  { lbl:'Fecha límite',    color:'#b3853a' },
@@ -5079,7 +5080,14 @@ function agendaItems(){
                contexto:q.client||'', persona:q.comercial||'', ref:q.ref||'',
                accion:"editQuote('"+q.id+"')" });
   });
-  return out.sort((a,b)=> a.fecha<b.fecha ? -1 : a.fecha>b.fecha ? 1 : 0);
+  // Reuniones del calendario de Outlook, si el usuario lo conectó.
+  CAL_EVENTOS.forEach(ev=> out.push(ev));
+  // Por día y, dentro del día, por hora (las reuniones tienen hora; lo demás no).
+  return out.sort((a,b)=>{
+    if(a.fecha!==b.fecha) return a.fecha<b.fecha ? -1 : 1;
+    const ha=a.hora||'', hb=b.hora||'';
+    return ha<hb ? -1 : ha>hb ? 1 : 0;
+  });
 }
 // Los que le tocan a una persona (comparando sin tildes).
 function agendaDe(items, persona){
@@ -5190,6 +5198,9 @@ function ensureAgendaStyles(){
     .ag-chip{display:block;font-size:10.5px;line-height:1.25;color:#fff;border-radius:4px;padding:2px 5px;margin-bottom:3px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .ag-more{font-size:10px;color:var(--muted)}
     .ag-empty{background:#fff;border:1px dashed #ddd9cc;border-radius:10px;padding:26px;text-align:center;color:var(--muted);font-size:13px}
+    .ag-join{background:#6264a7;color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
+    .ag-join:hover{background:#4f5194}
+    .ag-aviso{background:#fdf6ec;border:1px solid #e8d9bd;border-radius:9px;padding:10px 13px;font-size:12.5px;color:#7a6440;margin-bottom:12px;line-height:1.5}
   `;
   document.head.appendChild(st);
 }
@@ -5199,13 +5210,20 @@ function _agItemHTML(it){
   const t = AGENDA_TIPOS[it.tipo] || {lbl:it.tipo, color:'#888'};
   let cuando = '';
   if(dias!=null){
-    if(dias<0)       cuando = `<span class="ag-vencido">Vencido hace ${Math.abs(dias)} día${Math.abs(dias)===1?'':'s'}</span>`;
-    else if(dias===0)cuando = `<span class="ag-hoy">Vence hoy</span>`;
+    // Una reunión no "vence": pasó o es hoy.
+    const esReunion = (it.tipo==='reunion');
+    if(dias<0)       cuando = esReunion ? `Fue hace ${Math.abs(dias)} día${Math.abs(dias)===1?'':'s'}`
+                                        : `<span class="ag-vencido">Vencido hace ${Math.abs(dias)} día${Math.abs(dias)===1?'':'s'}</span>`;
+    else if(dias===0)cuando = `<span class="ag-hoy">${esReunion?'Hoy':'Vence hoy'}</span>`;
     else if(dias===1)cuando = 'Mañana';
     else             cuando = `En ${dias} días`;
   }
+  const unirse = it.joinUrl
+    ? `<button class="btn sm ag-join" onclick="event.stopPropagation();window.open('${it.joinUrl.replace(/'/g,'%27')}','_blank')">Unirse</button>`
+    : '';
   return `<div class="ag-item" style="border-left-color:${t.color}" onclick="${it.accion}">
     <div class="d"><div class="dd">${p?String(p.d).padStart(2,'0'):'--'}</div><div class="mm">${p?MESES[p.m-1].slice(0,3):''}</div></div>
+    ${unirse?`<div style="order:3;flex:none;align-self:center">${unirse}</div>`:''}
     <div class="b">
       <div class="tt">${esc(it.titulo)}</div>
       ${it.contexto?`<div class="cx">${esc(it.contexto)}</div>`:''}
@@ -5301,10 +5319,136 @@ VIEWS.agenda = function(){
       <span style="font-size:12px">La agenda se arma con los próximos pasos y fechas límite de las oportunidades, y con la validez de las ofertas enviadas.</span></div>`;
   }
 
+  const calCtrl = CAL_CONECTADO
+    ? `<span class="help">Calendario de Outlook conectado · <a href="#" onclick="event.preventDefault();desconectarCalendario()">desconectar</a></span>`
+    : `<button class="btn ghost" onclick="conectarCalendario()">Conectar mi calendario de Outlook</button>`;
+  const calAviso = CAL_ERROR ? `<div class="ag-aviso"><b>No se pudo traer el calendario.</b><br>${esc(CAL_ERROR)}</div>` : '';
+
   C().innerHTML = `<div class="ag-bar">${filtro}
       <div class="help" style="margin-left:auto">${mias.length} vencimiento(s)${venc?` · <span class="ag-vencido">${venc} vencido(s) en el equipo</span>`:''}</div>
-    </div>${cuerpo}`;
+    </div>
+    <div class="ag-bar">${calCtrl}</div>
+    ${calAviso}${cuerpo}`;
+
+  agendaAutoConectar();      // reconecta en silencio si ya se conectó antes
+  agendaSyncReuniones();     // trae las reuniones del rango visible
 };
+
+/* ---- Calendario de Outlook / Teams (solo lectura) ----
+   Reutiliza la MISMA app registrada que ya usa SharePoint, pidiéndole otro
+   permiso (Calendars.Read). Es opt-in: si el usuario no lo conecta, o si
+   Microsoft no da el permiso, la Agenda sigue funcionando igual. */
+const CAL_SCOPES = ['https://graph.microsoft.com/Calendars.Read'];
+const CAL_TZ = 'America/Argentina/Buenos_Aires';
+let CAL_EVENTOS = [];   // reuniones ya traídas, como items de agenda
+let CAL_CONECTADO = false;
+let CAL_ERROR = '';
+let CAL_RANGO = '';     // rango ya cargado, para no pedir lo mismo en cada render
+let _calCargando = false;
+
+function _calErrorTexto(e){
+  const m = String((e && e.message) || e || '');
+  if(/AADSTS65001|AADSTS90094|consent|admin/i.test(m))
+    return 'Microsoft pide que un administrador de la empresa apruebe el permiso '
+         + '"Calendars.Read" para la aplicación f47da2c5-7922-4e2f-8648-51b8486552fb '
+         + '(la misma que ya se usa para SharePoint). Es un permiso de solo lectura del calendario.';
+  if(/popup|ventana|blocked|user_cancelled/i.test(m))
+    return 'Se cerró o se bloqueó la ventana de Microsoft. Permití las ventanas emergentes para este sitio y probá otra vez.';
+  return m || 'No se pudo conectar el calendario.';
+}
+// Pasa un evento de Graph al formato de item que ya entiende la Agenda.
+function _calEventoAItem(ev, persona){
+  const ini = (ev.start && ev.start.dateTime) || '';
+  const fecha = ini.slice(0,10);
+  if(!fecha) return null;
+  const hora = ev.isAllDay ? '' : ini.slice(11,16);
+  const join = (ev.onlineMeeting && ev.onlineMeeting.joinUrl) || ev.onlineMeetingUrl || '';
+  const lugar = (ev.location && ev.location.displayName) || '';
+  return {
+    fecha, hora, tipo:'reunion',
+    titulo: ev.subject || '(sin asunto)',
+    contexto: lugar,
+    persona: persona || '',
+    ref:'', joinUrl: join,
+    accion: join ? ("window.open('"+join.replace(/'/g,"%27")+"','_blank')")
+                 : (ev.webLink ? ("window.open('"+String(ev.webLink).replace(/'/g,"%27")+"','_blank')") : '')
+  };
+}
+async function _calTraer(desde, hasta){
+  const t = await _spToken(false, CAL_SCOPES);
+  if(!t){ CAL_CONECTADO = false; return []; }
+  const url = 'https://graph.microsoft.com/v1.0/me/calendarView'
+    + '?startDateTime=' + desde + 'T00:00:00'
+    + '&endDateTime='   + hasta + 'T23:59:59'
+    + '&$select=subject,start,end,isAllDay,isCancelled,onlineMeeting,onlineMeetingUrl,webLink,location'
+    + '&$orderby=start/dateTime&$top=150';
+  const r = await fetch(url, { headers:{
+    'Authorization':'Bearer '+t,
+    // Sin esto Graph devuelve los horarios en UTC y las reuniones aparecen corridas.
+    'Prefer':'outlook.timezone="'+CAL_TZ+'"'
+  }});
+  if(!r.ok){
+    let det=''; try{ const j=await r.json(); det=(j.error&&j.error.message)||''; }catch(_){}
+    throw new Error('Graph respondió '+r.status+(det?': '+det:''));
+  }
+  const j = await r.json();
+  const yo = comercialActual();
+  return (j.value||[]).filter(ev=>!ev.isCancelled).map(ev=>_calEventoAItem(ev, yo)).filter(Boolean);
+}
+// Trae las reuniones del rango que se está mirando y re-dibuja una sola vez.
+// No entra en bucle: al volver, CAL_RANGO ya coincide y sale por el early return.
+async function agendaSyncReuniones(){
+  if(!CAL_CONECTADO || _calCargando) return;
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  let desde, hasta;
+  if(agendaVista==='calendario'){
+    const ref = agendaMesRef || {y:hoy.getFullYear(), m:hoy.getMonth()+1};
+    desde = _isoDe(new Date(ref.y, ref.m-1, -7));
+    hasta = _isoDe(new Date(ref.y, ref.m, 7));
+  } else {
+    desde = _isoDe(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()-7));
+    hasta = _isoDe(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()+60));
+  }
+  const clave = desde+'|'+hasta;
+  if(CAL_RANGO === clave) return;
+  _calCargando = true;
+  try{
+    CAL_EVENTOS = await _calTraer(desde, hasta);
+    CAL_RANGO = clave; CAL_ERROR = '';
+  }catch(e){
+    CAL_ERROR = _calErrorTexto(e); CAL_EVENTOS = []; CAL_RANGO = clave;
+  }finally{ _calCargando = false; }
+  if(current==='agenda') VIEWS.agenda();
+}
+async function conectarCalendario(){
+  try{
+    const t = await _spToken(true, CAL_SCOPES);
+    if(!t) throw new Error('Microsoft no devolvió el permiso.');
+    CAL_CONECTADO = true; CAL_ERROR = ''; CAL_RANGO = '';
+    try{ localStorage.setItem('cal_conectado','1'); }catch(_){}
+    toast('Calendario conectado');
+    VIEWS.agenda();
+  }catch(e){
+    CAL_CONECTADO = false; CAL_ERROR = _calErrorTexto(e);
+    VIEWS.agenda();
+  }
+}
+function desconectarCalendario(){
+  CAL_CONECTADO=false; CAL_EVENTOS=[]; CAL_RANGO=''; CAL_ERROR='';
+  try{ localStorage.removeItem('cal_conectado'); }catch(_){}
+  toast('Calendario desconectado'); VIEWS.agenda();
+}
+// Si ya se conectó antes, se reconecta solo y en silencio (sin ventana emergente).
+async function agendaAutoConectar(){
+  if(CAL_CONECTADO) return;
+  let marcado=false; try{ marcado = localStorage.getItem('cal_conectado')==='1'; }catch(_){}
+  if(!marcado) return;
+  try{
+    const t = await _spToken(false, CAL_SCOPES);
+    if(t){ CAL_CONECTADO = true; if(current==='agenda') VIEWS.agenda(); }
+  }catch(_){ /* si no se puede en silencio, queda el botón para conectar a mano */ }
+}
+window.conectarCalendario=conectarCalendario; window.desconectarCalendario=desconectarCalendario;
 
 // Cartel de recordatorio al abrir la app: solo lo vencido o de hoy, solo del
 // usuario identificado, y una sola vez por día para no volverse molesto.
@@ -5313,7 +5457,10 @@ function recordatoriosAlAbrir(){
     const yo = comercialActual(); if(!yo) return;
     const clave = 'ag_recordatorio_'+_normNom(yo).replace(/\s/g,'_');
     if(localStorage.getItem(clave)===todayISO()) return;
+    // Las reuniones quedan afuera: son reuniones, no pendientes. El cartel es
+    // para lo que hay que hacer y está vencido o vence hoy.
     const mios = agendaDe(agendaItems(), yo)
+      .filter(i=> i.tipo!=='reunion')
       .filter(i=>{ const d=_diasHasta(i.fecha); return d!=null && d<=0; });
     if(!mios.length) return;
     ensureAgendaStyles();
@@ -5402,15 +5549,22 @@ const SP_CFG = {
   carpetaMadreLink: 'https://4housing22.sharepoint.com/:f:/s/GerenciaComercial2/IgC0ea4JV54iTYQcS2OOgkEfAQvBjwxvvd-xIC1dTEFBasE?e=ZoVha9'
 };
 let _spMsal=null,_spTok=null,_spDrive=null,_spItem=null;
-async function _spToken(interactivo){
+// `scopes` es opcional: sin él pide los de SharePoint, como siempre. Con él sirve
+// para pedir OTRO permiso sobre la misma app registrada (p.ej. el calendario).
+// OJO: el token solo se cachea en _spTok cuando son los scopes de SharePoint. Un
+// token de calendario guardado ahí haría fallar _spFetch con 403.
+async function _spToken(interactivo, scopes){
+  const SCOPES = scopes || SP_CFG.scopes;
+  const esSharePoint = !scopes;
   let w=0; while(typeof msal==='undefined'&&w<5000){ await new Promise(r=>setTimeout(r,100)); w+=100; }
   if(typeof msal==='undefined') throw new Error('No se pudo cargar el módulo de Microsoft.');
   if(!_spMsal){ _spMsal=new msal.PublicClientApplication({auth:{clientId:SP_CFG.clientId,authority:SP_CFG.authority},cache:{cacheLocation:'sessionStorage',storeAuthStateInCookie:true}}); await _spMsal.initialize(); try{await _spMsal.handleRedirectPromise();}catch(_){} }
   const acc=_spMsal.getAllAccounts();
-  if(acc.length){ try{ const r=await _spMsal.acquireTokenSilent({scopes:SP_CFG.scopes,account:acc[0]}); _spTok=r.accessToken; return _spTok; }catch(_){} }
+  if(acc.length){ try{ const r=await _spMsal.acquireTokenSilent({scopes:SCOPES,account:acc[0]}); if(esSharePoint) _spTok=r.accessToken; return r.accessToken; }catch(_){} }
   if(!interactivo) return null;
-  const r2=await _spMsal.loginPopup({scopes:SP_CFG.scopes,redirectUri:SP_CFG.redirectUri});
-  _spTok=r2.accessToken; return _spTok;
+  const r2=await _spMsal.loginPopup({scopes:SCOPES,redirectUri:SP_CFG.redirectUri});
+  if(esSharePoint) _spTok=r2.accessToken;
+  return r2.accessToken;
 }
 async function _spFetch(url,opts){
   const t=await _spToken(true);
