@@ -258,8 +258,11 @@ textarea.inp{resize:vertical;min-height:60px;}
 .toolbar .search input{width:100%;border:1px solid var(--line-strong);border-radius:10px;padding:11px 12px 11px 38px;font-size:14px;background:#fff;}
 .toolbar .search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:17px;height:17px;color:var(--muted);}
 .filterpills{display:flex;gap:6px;flex-wrap:wrap;}
-.pill{background:#fff;border:1px solid var(--line-strong);border-radius:30px;padding:7px 14px;font-size:12.5px;font-weight:600;color:#6f6c60;}
+.pill,.tpill{background:#fff;border:1px solid var(--line-strong);border-radius:30px;padding:7px 14px;font-size:12.5px;font-weight:600;color:#6f6c60;}
 .pill.active{background:var(--olive-deep);color:#fff;border-color:var(--olive-deep);}
+.tpill.active{background:#5f7a4e;color:#fff;border-color:#5f7a4e;}
+.tipofiltro{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.tipofiltro .lbl{font-size:11px;font-weight:700;color:#94917f;text-transform:uppercase;letter-spacing:.04em;}
 
 /* ===== COTIZADOR (preview area) ===== */
 .cotz-layout{display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start;}
@@ -1312,6 +1315,7 @@ function emptyState(t,s){
 
 /* ================= QUOTES LIST ================= */
 let quoteFilterSet=new Set(), quoteSearch=''; // estados seleccionados (vacío = todos)
+let quoteTipoFilter=''; // '' = todo | 'op' = solo oportunidades | 'oe' = solo ofertas económicas
 window.quoteSort = { col:'fecha', dir:-1 }; // por defecto: más recientes primero
 
 // Agrupa cotizaciones por número de oferta (seq). Devuelve grupos ordenados,
@@ -1384,6 +1388,9 @@ VIEWS.quotes = function(){
     list=list.filter(x=>x.comercial===filtroVendedor);
     opps=opps.filter(o=>o.comercial===filtroVendedor);
   }
+  // filtro por tipo de fila: OP (oportunidades) u OE (ofertas económicas)
+  if(quoteTipoFilter==='op') list=[];
+  else if(quoteTipoFilter==='oe') opps=[];
   const groups = groupQuotes(list);
   const hayAlgo = groups.length || opps.length;
 
@@ -1391,6 +1398,11 @@ VIEWS.quotes = function(){
     <div class="toolbar">
       <div class="search">${ICO.search}<input id="qSearch" placeholder="Buscar en todos los campos de la cotización…" value="${esc(quoteSearch)}"></div>
       ${vendedorFilterSelect('qVend')}
+      <div class="tipofiltro">
+        <span class="lbl">Ver</span>
+        <button class="tpill ${quoteTipoFilter==='op'?'active':''}" data-tf="op">Oportunidades (OP)</button>
+        <button class="tpill ${quoteTipoFilter==='oe'?'active':''}" data-tf="oe">Ofertas económicas (OE)</button>
+      </div>
       <div class="filterpills">
         <button class="pill ${quoteFilterSet.size===0?'active':''}" data-f="all">Todas</button>
         ${STATES.map(s=>`<button class="pill ${quoteFilterSet.has(s.id)?'active':''}" data-f="${s.id}">${s.label}</button>`).join('')}
@@ -1419,6 +1431,11 @@ VIEWS.quotes = function(){
     if(f==='all') quoteFilterSet.clear();
     else if(quoteFilterSet.has(f)) quoteFilterSet.delete(f);
     else quoteFilterSet.add(f);
+    VIEWS.quotes();
+  });
+  document.querySelectorAll('.tpill').forEach(p=>p.onclick=()=>{
+    const tf=p.dataset.tf;
+    quoteTipoFilter = (quoteTipoFilter===tf) ? '' : tf; // volver a tocar quita el filtro
     VIEWS.quotes();
   });
   { const v=document.getElementById('qVend'); if(v) v.onchange=()=>{ filtroVendedor=v.value; VIEWS.quotes(); }; }
@@ -2652,6 +2669,7 @@ async function saveAct(oppId){
 
 /* ================= VENTAS (lista unificada por estado) ================= */
 let ventasFilterSet = new Set(), ventasSearch = ''; // estados seleccionados (vacío = todos)
+let ventasTipoFilter=''; // '' = todo | 'op' = solo oportunidades | 'oe' = solo ofertas económicas
 window.ventasSort = { col:'fecha', dir:-1 };
 
 VIEWS.ventas = function(){
@@ -2684,6 +2702,9 @@ VIEWS.ventas = function(){
     list = list.filter(q=> q.comercial===filtroVendedor);
     opps = opps.filter(o=> o.comercial===filtroVendedor);
   }
+  // filtro por tipo de fila: OP (oportunidades) u OE (ofertas económicas)
+  if(ventasTipoFilter==='op') list=[];
+  else if(ventasTipoFilter==='oe') opps=[];
   // Ordena las oportunidades con el mismo criterio de columna que las cotizaciones
   const oppKey = (o, col)=>{
     switch(col){
@@ -2711,6 +2732,11 @@ VIEWS.ventas = function(){
     <div class="toolbar">
       <div class="search">${ICO.search}<input id="vSearch" placeholder="Buscar en todos los campos de la cotización…" value="${esc(ventasSearch)}"></div>
       ${vendedorFilterSelect('vVend')}
+      <div class="tipofiltro">
+        <span class="lbl">Ver</span>
+        <button class="tpill ${ventasTipoFilter==='op'?'active':''}" data-tf="op">Oportunidades (OP)</button>
+        <button class="tpill ${ventasTipoFilter==='oe'?'active':''}" data-tf="oe">Ofertas económicas (OE)</button>
+      </div>
       <div class="filterpills">
         <button class="pill ${ventasFilterSet.size===0?'active':''}" data-f="all">Todas</button>
         ${STATES.map(s=>`<button class="pill ${ventasFilterSet.has(s.id)?'active':''}" data-f="${s.id}">${s.label}</button>`).join('')}
@@ -2740,6 +2766,11 @@ VIEWS.ventas = function(){
     if(f==='all') ventasFilterSet.clear();
     else if(ventasFilterSet.has(f)) ventasFilterSet.delete(f);
     else ventasFilterSet.add(f);
+    VIEWS.ventas();
+  });
+  C().querySelectorAll('.tpill').forEach(p=>p.onclick=()=>{
+    const tf=p.dataset.tf;
+    ventasTipoFilter = (ventasTipoFilter===tf) ? '' : tf; // volver a tocar quita el filtro
     VIEWS.ventas();
   });
   { const v=document.getElementById('vVend'); if(v) v.onchange=()=>{ filtroVendedor=v.value; VIEWS.ventas(); }; }
