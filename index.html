@@ -172,6 +172,9 @@ tr.ver-child.hide{display:none;}
 .ps-en_conversacion{background:#fbf1e0;color:#b3853a;}
 .ps-calificado{background:#e6f1e3;color:#4f8a53;}
 .ps-descartado{background:#f6ebea;color:#b0584f;}
+/* vías de contacto de leads entrantes */
+.via-whatsapp{background:#e3f3e6;color:#3b8a4f;}
+.via-formulario_web{background:#e7eef6;color:#4f7099;}
 .emp-card{cursor:pointer;}
 .emp-stat-pills{display:flex;gap:6px;flex-wrap:wrap;}
 .mini-pill{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:20px;}
@@ -913,7 +916,9 @@ function rowToProspecto(r){
     cargo:r.cargo||'', email:r.email||'', emailEstado:r.email_estado||'', seniority:r.seniority||'',
     departamento:r.departamento||'', telefono:r.telefono||'', linkedin:r.linkedin||'',
     ciudad:r.ciudad||'', pais:r.pais||'', estado:r.estado||'sin_contactar',
-    oppId:r.oportunidad_id||'', notas:r.notas||''
+    oppId:r.oportunidad_id||'', notas:r.notas||'',
+    viaContacto:r.via_contacto||'', motivo:r.motivo||'',
+    created:r.created_at?Date.parse(r.created_at):0
   };
 }
 // ---- Cobranzas / Pagos / Adicionales ----
@@ -2935,7 +2940,33 @@ function toggleVentasFiltro(f){
 /* ================= PROSPECCIÓN ================= */
 const PROSP_ESTADOS = ['sin_contactar','contactado','en_conversacion','calificado','descartado'];
 const PROSP_ESTADO_LBL = { sin_contactar:'Sin contactar', contactado:'Contactado', en_conversacion:'En conversación', calificado:'Calificado', descartado:'Descartado' };
-let prospView = { mode:'empresas', empresaId:null, search:'', filtroEstado:'', sector:'', filtroEstadoEmp:'', filtroComercial:'' };
+// Leads entrantes: vías de contacto y estado DERIVADO de la oportunidad.
+const VIA_LBL = { whatsapp:'WhatsApp', formulario_web:'Formulario web' };
+// El estado que se muestra para un lead entrante NO se edita a mano: es un
+// reflejo del estado de su oportunidad vinculada, con las mismas palabras que
+// se usan en Comercial (Nuevo, Cotizado, En negociación, Ganado, Descartado).
+// Los ~1900 prospectos outbound no pasan por acá (no tienen via_contacto).
+function leadEstadoDeOpp(p){
+  const o = p.oppId ? DB.opps.find(x=>x.id===p.oppId) : null;
+  if(!o) return { lbl:'Sin oportunidad', cls:'sin_contactar' };
+  if(o.state==='desestimada' || o.state==='perdida') return { lbl:'Descartado', cls:'descartado' };
+  if(o.cotizacionId || o.state==='enviada') return { lbl:'Cotizado', cls:'calificado' };
+  if(o.state==='ganada') return { lbl:'Ganado', cls:'calificado' };
+  if(o.state==='negociacion') return { lbl:'En negociación', cls:'en_conversacion' };
+  if(o.state==='borrador') return { lbl:'En proceso', cls:'contactado' };
+  return { lbl:'Nuevo', cls:'sin_contactar' }; // estado 'nuevo'
+}
+let prospView = { mode:'empresas', tab:'empresas', empresaId:null, search:'', filtroEstado:'', sector:'', filtroEstadoEmp:'', filtroComercial:'', viaFiltro:'' };
+// Barra de pestañas de Prospección: base outbound (Empresas) vs leads entrantes.
+function prospTabBar(){
+  const nEntr = DB.prospectos.filter(p=>p.viaContacto).length;
+  return `<div class="filterpills" style="margin-bottom:14px">
+    <button class="pill ${prospView.tab==='empresas'?'active':''}" onclick="setProspTab('empresas')">Empresas</button>
+    <button class="pill ${prospView.tab==='entrantes'?'active':''}" onclick="setProspTab('entrantes')">Consultas entrantes${nEntr?` (${nEntr})`:''}</button>
+  </div>`;
+}
+function setProspTab(t){ prospView.tab=t; if(t==='empresas') prospView.mode='empresas'; VIEWS.prosp(); }
+window.setProspTab = setProspTab;
 
 VIEWS.prosp = async function(){
   setHeader('Prospección','Prospección comercial multisector',
@@ -2946,6 +2977,7 @@ VIEWS.prosp = async function(){
     try{ await loadProspeccion(); }
     catch(e){ C().innerHTML = `<div class="empty"><div style="color:#b4554e;font-weight:600">No se pudo cargar la prospección</div><div style="margin-top:6px">${esc(e.message)}</div></div>`; return; }
   }
+  if(prospView.tab==='entrantes') return renderEntrantes();
   if(prospView.mode==='empresas') renderEmpresas();
   else renderEmpresaDetalle();
 };
@@ -3061,6 +3093,7 @@ function renderEmpresas(){
   ).join('');
 
   C().innerHTML = `
+    ${prospTabBar()}
     <div class="kpi-grid" style="margin-bottom:16px">
       ${kpiCard('Contactados hoy', k.hoy, 30, 'Gestiones registradas hoy · objetivo 30')}
       ${kpiCard('Contactados ayer', k.ayer, 30, 'Gestiones de ayer · objetivo 30')}
@@ -3117,6 +3150,96 @@ function renderEmpresas(){
 function toggleProspEstado(st){ prospView.filtroEstadoEmp = (prospView.filtroEstadoEmp===st)?'':st; renderEmpresas(); }
 window.toggleProspEstado = toggleProspEstado;
 window.refrescarProspeccion = refrescarProspeccion;
+
+// ---- Consultas entrantes (leads de formulario web + WhatsApp) ----
+// Vista plana (no agrupada por empresa) de los prospectos que entraron por el
+// pipeline de mails. Estado espejado de la oportunidad, filtro por vía e
+// indicadores por vía / mes / motivo. La base outbound no se toca.
+function renderEntrantes(){
+  const all = DB.prospectos.filter(p=> p.viaContacto);
+  let leads = all.slice();
+  if(prospView.viaFiltro) leads = leads.filter(p=> p.viaContacto===prospView.viaFiltro);
+  leads.sort((a,b)=> (b.created||0)-(a.created||0));
+
+  // Indicadores
+  const totWA  = all.filter(p=> p.viaContacto==='whatsapp').length;
+  const totWeb = all.filter(p=> p.viaContacto==='formulario_web').length;
+  const tm = startOfMonth();
+  const mes = all.filter(p=> (p.created||0)>=tm).length;
+
+  // Breakdown por motivo (sobre el total, no sobre el filtro)
+  const porMotivo = {};
+  all.forEach(p=>{ const m=(p.motivo||'—').trim()||'—'; porMotivo[m]=(porMotivo[m]||0)+1; });
+  const motivoRows = Object.entries(porMotivo).sort((a,b)=> b[1]-a[1]);
+  const maxMot = motivoRows.length ? motivoRows[0][1] : 0;
+  const motivoChart = motivoRows.length
+    ? motivoRows.map(([m,n])=>{
+        const pct = maxMot? Math.round(100*n/maxMot):0;
+        return `<div class="qc-row"><div class="qc-name">${esc(m)}</div>
+          <div class="qc-track"><div class="qc-fill" style="width:${pct}%"></div></div>
+          <div class="qc-val">${n}</div></div>`;
+      }).join('')
+    : '<div class="help" style="padding:8px 0">Todavía no entraron consultas.</div>';
+
+  const viaOpts = `<option value="">Todas las vías</option>`+
+    Object.keys(VIA_LBL).map(v=>`<option value="${v}" ${v===prospView.viaFiltro?'selected':''}>${VIA_LBL[v]}</option>`).join('');
+
+  const filas = leads.map(p=>{
+    const est = leadEstadoDeOpp(p);
+    const o = p.oppId ? DB.opps.find(x=>x.id===p.oppId) : null;
+    const fecha = p.created? new Date(p.created).toLocaleDateString('es-AR') : '—';
+    const cont = [p.email?esc(p.email):'', p.telefono?esc(p.telefono):''].filter(Boolean).join(' · ') || '<span class="help">—</span>';
+    return `<tr class="clickable" data-id="${p.id}" data-opp="${p.oppId||''}">
+      <td><strong>${esc(p.nombre||'—')}</strong>${o&&o.ref?`<br><span class="help" style="font-size:10.5px">${esc(o.ref)}</span>`:''}</td>
+      <td><span class="badge via-${p.viaContacto}">${VIA_LBL[p.viaContacto]||p.viaContacto}</span></td>
+      <td style="font-size:12.5px">${esc(p.motivo||'—')}</td>
+      <td class="prosp-contact" style="font-size:12px;line-height:1.7">${cont}</td>
+      <td class="nowrap" style="font-size:12px">${fecha}</td>
+      <td><span class="badge ps-${est.cls}">${esc(est.lbl)}</span></td>
+    </tr>`;
+  }).join('');
+
+  C().innerHTML = `
+    ${prospTabBar()}
+    <div class="kpi-grid" style="margin-bottom:16px">
+      ${kpiCard('Total entrantes', all.length, 0, 'Leads cargados desde formulario y WhatsApp')}
+      ${kpiCard('Por WhatsApp', totWA, 0, 'Contactos vía botón de WhatsApp')}
+      ${kpiCard('Por formulario web', totWeb, 0, 'Contactos vía formulario de contacto')}
+      ${kpiCard('Este mes', mes, 0, 'Entrantes del mes en curso')}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;align-items:start">
+      <div class="card"><div class="card-b">
+        <div style="font-size:13px;font-weight:700;color:#37432c;margin-bottom:12px">Por motivo de la consulta</div>
+        <div class="qc-chart">${motivoChart}</div>
+      </div></div>
+      <div class="card"><div class="card-b">
+        <div style="font-size:13px;font-weight:700;color:#37432c;margin-bottom:8px">Cómo se lee el estado</div>
+        <div class="help" style="line-height:1.7">El estado de cada lead <strong>refleja el de su oportunidad</strong> (Nuevo → Cotizado → En negociación → Ganado / Descartado) y se actualiza solo a medida que la trabajás en Comercial. Tocá un lead para abrir su oportunidad.</div>
+      </div></div>
+    </div>
+    <div class="opp-filters">
+      <select id="eVia">${viaOpts}</select>
+      ${prospView.viaFiltro?`<button class="btn ghost sm" onclick="setProspVia('')">Quitar filtro: ${VIA_LBL[prospView.viaFiltro]}</button>`:''}
+      <span class="help" style="margin-left:auto">${leads.length} ${leads.length===1?'consulta':'consultas'}${prospView.viaFiltro?' (filtradas)':''}</span>
+    </div>
+    <div class="card"><div class="card-b" style="padding:0">
+      ${all.length? `<table class="grid">
+        <thead><tr><th>Contacto</th><th>Vía</th><th>Motivo</th><th>Email / Tel.</th><th>Fecha</th><th>Estado</th></tr></thead>
+        <tbody>${filas}</tbody>
+      </table>`
+      : `<div class="empty" style="padding:40px"><div style="font-weight:600;color:#37432c">Todavía no hay consultas entrantes</div><div class="help" style="margin-top:6px">Cuando alguien complete el formulario de la web o el contacto por WhatsApp, va a aparecer acá automáticamente, además de crearse la oportunidad de siempre.</div></div>`}
+    </div></div>`;
+
+  const vSel=document.getElementById('eVia');
+  if(vSel) vSel.onchange=()=>{ prospView.viaFiltro=vSel.value; renderEntrantes(); };
+  C().querySelectorAll('tr.clickable').forEach(tr=> tr.onclick=()=>{
+    const oid=tr.dataset.opp;
+    if(oid && DB.opps.find(o=>o.id===oid)) openOpp(oid);
+    else openProspecto(tr.dataset.id);
+  });
+}
+function setProspVia(v){ prospView.viaFiltro=v; renderEntrantes(); }
+window.setProspVia = setProspVia;
 
 function renderEmpresaDetalle(){
   const e = DB.empProsp.find(x=>x.id===prospView.empresaId);
