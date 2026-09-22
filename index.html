@@ -2650,10 +2650,13 @@ async function notificarCobranza(payload){
       tokenUsuario = (data && data.session && data.session.access_token) || '';
     }catch(e){ /* sin sesión: la función va a rechazar, y se avisa abajo */ }
 
+    // Sin header 'apikey': la función declara en su CORS sólo "authorization,
+    // content-type", así que cualquier header extra hace que el navegador bloquee
+    // la llamada en el preflight, antes de que salga. Para la Edge Function alcanza
+    // con el Authorization.
     const r = await fetch(SB_URL + '/functions/v1/notificar-cobranza', {
       method:'POST',
-      headers:{'Content-Type':'application/json', 'apikey': SB_KEY,
-               'Authorization':'Bearer '+tokenUsuario},
+      headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+tokenUsuario},
       body: JSON.stringify(payload)
     });
     okMail = r.ok;
