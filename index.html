@@ -654,7 +654,9 @@ const SEED_CATALOG = [
 
 /* ================= SUPABASE (capa de datos en la nube) ================= */
 const SB_URL  = 'https://wcpkpwxhqdcdljfwzcmy.supabase.co';
-const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjcGtwd3hocWRjZGxqZnd6Y215Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNDM4NDAsImV4cCI6MjA5NjYxOTg0MH0.MSTk46VAwdAsn5qNBdrHmGIiLYyN-rAyAZC72xZW3D4';
+// Clave pública del proyecto (publishable). Reemplaza a la anon legacy, que se
+// desactiva una vez migradas todas las apps del proyecto compartido.
+const SB_KEY  = 'sb_publishable_08decRYdCRUdtO5zogvJVg_VEBCN9pf';
 const SB_REST = SB_URL + '/rest/v1';
 
 // URL del flujo de Power Automate que avisa a Facturación de una venta ganada (Teams + mail).
@@ -668,24 +670,29 @@ const sbClient = window.supabase.createClient(SB_URL, SB_KEY);
 
 // Cliente REST mínimo (sin librerías externas; usa fetch nativo)
 async function sbFetch(path, opts={}, _retry=false){
-  // Token de la sesión actual (si el usuario está logueado); si no, cae a la anon key
-  let token = SB_KEY;
+  // Token de la sesión actual, si el usuario está logueado.
+  let token = '';
   try{
     const { data } = await sbClient.auth.getSession();
     if(data && data.session && data.session.access_token){
       token = data.session.access_token;
     }
-  }catch(e){ /* sin sesión: usa anon key */ }
+  }catch(e){ /* sin sesión: la petición entra como anónima y RLS decide */ }
+
+  // La clave del proyecto va SIEMPRE en 'apikey'. Authorization lleva el token del
+  // usuario y sólo va si hay sesión: antes se mandaba la clave ahí como si fuera un
+  // token, lo cual funcionaba sólo porque la clave legacy es un JWT. Las claves
+  // nuevas (sb_publishable_…) no lo son y ese header las haría rebotar.
+  const headers = {
+    'apikey': SB_KEY,
+    'Content-Type': 'application/json',
+    'Prefer': opts.prefer || 'return=representation'
+  };
+  if(token) headers['Authorization'] = 'Bearer ' + token;
 
   const res = await fetch(SB_REST + path, {
     ...opts,
-    headers: {
-      'apikey': SB_KEY,
-      'Authorization': 'Bearer ' + token,
-      'Content-Type': 'application/json',
-      'Prefer': opts.prefer || 'return=representation',
-      ...(opts.headers||{})
-    }
+    headers: { ...headers, ...(opts.headers||{}) }
   });
   if(!res.ok){
     // Token vencido (401/403 con JWT expirado): refresca la sesión y reintenta UNA vez.
@@ -2630,10 +2637,23 @@ async function notificarCobranza(payload){
     }catch(e){ console.warn('Aviso Teams no enviado:', e.message); }
   }
   // 2) Mail: vía Edge Function (server-side, Microsoft Graph).
+  // La función tiene "Verify JWT" activado, así que el header Authorization tiene
+  // que llevar un JWT de verdad. Antes iba la clave del proyecto, que sólo servía
+  // porque la clave legacy es un JWT — con la publishable rebotaría. Va el token
+  // del usuario logueado, que además es lo correcto: así el aviso a Facturación
+  // sólo lo puede disparar alguien con sesión, y no cualquiera que copie la clave
+  // del HTML.
   try{
+    let tokenUsuario = '';
+    try{
+      const { data } = await sbClient.auth.getSession();
+      tokenUsuario = (data && data.session && data.session.access_token) || '';
+    }catch(e){ /* sin sesión: la función va a rechazar, y se avisa abajo */ }
+
     const r = await fetch(SB_URL + '/functions/v1/notificar-cobranza', {
       method:'POST',
-      headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+SB_KEY},
+      headers:{'Content-Type':'application/json', 'apikey': SB_KEY,
+               'Authorization':'Bearer '+tokenUsuario},
       body: JSON.stringify(payload)
     });
     okMail = r.ok;
