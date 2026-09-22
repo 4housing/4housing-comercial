@@ -28,6 +28,18 @@
 //
 // Secrets: ANTHROPIC_API_KEY, SERVICE_ROLE_KEY
 // Archivo: supabase/functions/clasificar-mail/index.ts
+//
+// ⚠ SERVICE_ROLE_KEY tiene que ser la clave service_role LEGACY (la que empieza
+// con "eyJ..."), no una secret key del formato nuevo ("sb_secret_..."). Probado
+// el 22/09/2026: con el formato nuevo, todas las escrituras a la base fallan por
+// RLS y la entrada de mails se corta. Y se corta EN SILENCIO para el que mira de
+// afuera: el filtro anti-bucle escribe sin chequear el error y devuelve 200, así
+// que una prueba manual parece exitosa mientras los mails reales mueren en el
+// 500 de "Error guardando el mail" (más abajo).
+//
+// Por eso las claves JWT legacy del proyecto siguen habilitadas. Si alguna vez
+// hay que desactivarlas, ANTES hay que adaptar esta función para escribir con
+// una clave de formato nuevo y probar la entrada de mails de punta a punta.
 // =====================================================================
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
