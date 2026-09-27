@@ -1182,8 +1182,8 @@ VIEWS.dashboard = function(){
 
   // conjuntos base
   const vigentes = q.filter(x=>!['ganada','perdida'].includes(x.state));
-  const ganadasCM = q.filter(x=>x.state==='ganada' && monthKey(x.created)===cm);
-  const ganadasPM = q.filter(x=>x.state==='ganada' && monthKey(x.created)===pm);
+  const ganadasCM = q.filter(x=>x.state==='ganada' && monthKey(x.fechaEstado||x.created)===cm);
+  const ganadasPM = q.filter(x=>x.state==='ganada' && monthKey(x.fechaEstado||x.created)===pm);
   const cotsCM = q.filter(x=>monthKey(x.created)===cm);
   const cotsPM = q.filter(x=>monthKey(x.created)===pm);
   const convCM = cotsCM.length ? (ganadasCM.length/cotsCM.length*100) : 0;
@@ -1200,9 +1200,9 @@ VIEWS.dashboard = function(){
     { key:'vigentes', label:'Cotizaciones vigentes', value:vigentes.length, target:30,
       fn:x=>!['ganada','perdida'].includes(x.state), sub:'No ganadas ni perdidas · objetivo 30' },
     { key:'ganCM', label:'Ganadas mes actual', value:ganadasCM.length, target:3,
-      fn:x=>x.state==='ganada'&&monthKey(x.created)===cm, sub:'Objetivo 3 / mes' },
+      fn:x=>x.state==='ganada'&&monthKey(x.fechaEstado||x.created)===cm, sub:'Objetivo 3 / mes' },
     { key:'ganPM', label:'Ganadas mes anterior', value:ganadasPM.length, target:3,
-      fn:x=>x.state==='ganada'&&monthKey(x.created)===pm, sub:'Objetivo 3 / mes' },
+      fn:x=>x.state==='ganada'&&monthKey(x.fechaEstado||x.created)===pm, sub:'Objetivo 3 / mes' },
     { key:'convCM', label:'Conversión mes actual', value:convCM, target:10, pct:true,
       fn:x=>monthKey(x.created)===cm, sub:'Ganadas / cotizadas · objetivo 10%' },
     { key:'convPM', label:'Conversión mes anterior', value:convPM, target:10, pct:true,
@@ -2863,8 +2863,14 @@ function ventasKPIs(){
   // Los indicadores de COTIZACIÓN cuentan OE (última versión de cada grupo).
   const q = quotesVentasUlt();
   const cotizadas    = q.filter(x=> x.state==='enviada').length;                         // a la espera de respuesta
+  const cm = curMonthKey();
   const cotizadasMes = q.filter(x=> ['enviada','negociacion','ganada','perdida'].includes(x.state) && x.created>=tm).length;
-  const ganadasMes   = q.filter(x=> x.state==='ganada' && x.created>=tm).length;
+  // Ganadas/perdidas del MES por fecha en que se ganó/perdió (fecha_estado), no por creación.
+  const ganadasMes   = q.filter(x=> x.state==='ganada'  && monthKey(x.fechaEstado||x.created)===cm).length;
+  const perdidasMes  = q.filter(x=> x.state==='perdida' && monthKey(x.fechaEstado||x.created)===cm).length;
+  const cerradasMes  = ganadasMes + perdidasMes;
+  const convMes      = cerradasMes>0 ? Math.round(100*ganadasMes/cerradasMes) : 0;   // conversión del mes
+  // Conversión histórica (acumulada, todo el tiempo).
   const cerradas     = q.filter(x=> x.state==='ganada' || x.state==='perdida').length;
   const conv         = cerradas>0 ? Math.round(100*q.filter(x=>x.state==='ganada').length/cerradas) : 0;
   // Pipeline = OE en borrador / enviada / negociación (USD; ARS aparte).
@@ -2874,7 +2880,7 @@ function ventasKPIs(){
     const monto = quoteTotal(x);
     if(x.currency==='ARS') pipelineArs += monto; else pipeline += monto;
   });
-  return { nuevasHoy, enProceso, cotizadas, cotizadasMes, ganadasMes, pipeline, pipelineArs, conv };
+  return { nuevasHoy, enProceso, cotizadas, cotizadasMes, ganadasMes, perdidasMes, pipeline, pipelineArs, convMes, conv };
 }
 
 let ventasPanelFiltro = ''; // '' | 'hoy' | 'activas' | 'enviada' | 'cotizadas_mes' | 'ganada'
@@ -2892,6 +2898,33 @@ function rowQuoteMini(x){
   </tr>`;
 }
 
+// Origen (primera versión) de una OE de ventas: fecha en que se cotizó por primera vez.
+function oeOrigenTs(x){
+  const key = (x.seq!=null) ? ('s'+x.seq) : ('id'+x.id);
+  let origen = x.created;
+  DB.quotes.forEach(q=>{
+    if(q.unidad!=='ventas' && q.unidad!=='ambas') return;
+    const k = (q.seq!=null) ? ('s'+q.seq) : ('id'+q.id);
+    if(k===key && q.created && (!origen || q.created<origen)) origen = q.created;
+  });
+  return origen;
+}
+// Fila de cotización GANADA con el cruce: mes cotizada (origen) vs mes ganada (cierre).
+function rowQuoteGanada(x){
+  const origen = oeOrigenTs(x);
+  const mesCot = origen ? nombreMesCorto(monthKey(origen)) : '—';
+  const mesGan = x.fechaEstado ? nombreMesCorto(monthKey(x.fechaEstado)) : '—';
+  const cruza  = (origen && x.fechaEstado && monthKey(origen)!==monthKey(x.fechaEstado));
+  return `<tr class="clickable" data-id="${x.id}">
+    <td class="nowrap"><b>${esc(x.ref||'—')}</b></td>
+    <td>${esc(upperName(x.client)||'—')}</td>
+    <td>${esc(titleCase(x.comercial)||'—')}</td>
+    <td class="r nowrap"><b>${curSym(x.currency)} ${fmt(quoteTotal(x))}</b></td>
+    <td class="nowrap" style="color:#94917f">${mesCot}</td>
+    <td class="nowrap"><b style="color:${cruza?'#b8791f':'#4f8a53'}" title="${cruza?'Cotizada y ganada en meses distintos':'Cotizada y ganada el mismo mes'}">${mesGan}</b></td>
+  </tr>`;
+}
+
 VIEWS.dashboard_ventas = function(){
   setHeader('Ventas','Indicadores comerciales');
   const k = ventasKPIs();
@@ -2905,15 +2938,25 @@ VIEWS.dashboard_ventas = function(){
     let qs = quotesVentasUlt();
     if(filtroVendedor) qs = qs.filter(q=> q.comercial===filtroVendedor);
     if(f==='enviada')            qs = qs.filter(q=> q.state==='enviada');
-    else if(f==='ganada')        qs = qs.filter(q=> q.state==='ganada');
+    else if(f==='ganada')        qs = qs.filter(q=> q.state==='ganada' && monthKey(q.fechaEstado||q.created)===curMonthKey());
     else if(f==='cotizadas_mes') qs = qs.filter(q=> ['enviada','negociacion','ganada','perdida'].includes(q.state) && q.created>=startOfMonthTs());
-    qs.sort((a,b)=> b.created-a.created);
-    tituloLista = 'Cotizaciones · ' + ({enviada:'a la espera', ganada:'ganadas', cotizadas_mes:'del mes'}[f]||'');
+    // Ganadas del mes: ordenar por fecha de cierre (fecha_estado); el resto por creación.
+    if(f==='ganada') qs.sort((a,b)=> (b.fechaEstado||b.created)-(a.fechaEstado||a.created));
+    else             qs.sort((a,b)=> b.created-a.created);
+    tituloLista = 'Cotizaciones · ' + ({enviada:'a la espera', ganada:'ganadas del mes', cotizadas_mes:'del mes'}[f]||'');
     subLista = 'Tocá de nuevo el indicador para quitar el filtro';
-    bodyHtml = qs.length ? `<table class="grid">
-        <thead><tr><th>Ref.</th><th>Cliente</th><th>Comercial</th><th>Estado</th><th class="r">Total</th><th class="r">Fecha</th></tr></thead>
-        <tbody>${qs.map(rowQuoteMini).join('')}</tbody></table>`
-      : `<div class="empty" style="padding:40px">No hay cotizaciones con este filtro.</div>`;
+    if(f==='ganada'){
+      // Vista con el cruce cotizada→ganada por negocio.
+      bodyHtml = qs.length ? `<table class="grid">
+          <thead><tr><th>Ref.</th><th>Cliente</th><th>Comercial</th><th class="r">Total</th><th>Cotizada</th><th>Ganada</th></tr></thead>
+          <tbody>${qs.map(rowQuoteGanada).join('')}</tbody></table>`
+        : `<div class="empty" style="padding:40px">No hay cotizaciones ganadas este mes.</div>`;
+    } else {
+      bodyHtml = qs.length ? `<table class="grid">
+          <thead><tr><th>Ref.</th><th>Cliente</th><th>Comercial</th><th>Estado</th><th class="r">Total</th><th class="r">Fecha</th></tr></thead>
+          <tbody>${qs.map(rowQuoteMini).join('')}</tbody></table>`
+        : `<div class="empty" style="padding:40px">No hay cotizaciones con este filtro.</div>`;
+    }
   } else {
     // Oportunidades VIGENTES (sin cotizar): una vez cotizada, la OP deja de ser
     // oportunidad y vive como OE en la pestaña Cotizaciones (con su "desde OP-…").
@@ -2937,8 +2980,9 @@ VIEWS.dashboard_ventas = function(){
       ${kpiCard('Oportunidades activas', k.enProceso, 5, 'Nuevas y en proceso · obj. 5', {onclick:"toggleVentasFiltro('activas')", active:f==='activas'})}
       ${kpiCard('Cotizadas a la espera', k.cotizadas, 20, 'Esperando respuesta · obj. 20', {onclick:"toggleVentasFiltro('enviada')", active:f==='enviada'})}
       ${kpiCard('Cotizadas (mes)', k.cotizadasMes, 20, 'Generadas este mes · obj. 20', {onclick:"toggleVentasFiltro('cotizadas_mes')", active:f==='cotizadas_mes'})}
-      ${kpiCard('Ganadas (mes)', k.ganadasMes, 2, 'Cerradas con éxito · obj. 2', {onclick:"toggleVentasFiltro('ganada')", active:f==='ganada'})}
-      ${kpiCard('Conversión', k.conv, 10, 'Ganadas / cerradas · obj. 10%', {pct:true})}
+      ${kpiCard('Ganadas (mes)', k.ganadasMes, 2, 'Ganadas este mes (por fecha de cierre) · obj. 2', {onclick:"toggleVentasFiltro('ganada')", active:f==='ganada'})}
+      ${kpiCard('Conversión (mes)', k.convMes, 10, 'Ganadas / cerradas del mes · obj. 10%', {pct:true})}
+      ${kpiCard('Conversión (histórica)', k.conv, 10, 'Ganadas / cerradas de todo el histórico', {pct:true})}
       ${kpiCard('Pipeline', (k.pipeline?('USD '+fmt(k.pipeline)):'—'), 0, 'Cotizaciones en borrador, enviadas o en negociación (USD)'+(k.pipelineArs?(' · + $ '+fmt(k.pipelineArs)+' ARS'):''))}
     </div>
     <div class="card"><div class="card-b" style="padding:0">
@@ -5161,6 +5205,7 @@ function graficasCierres(unidad){
   if(unidad==='ventas') cards.push(_chartCard('Pipeline por mes (USD)', _svgArea(s.map(x=>({label:L(x.periodo), value:(x.ind.pipeline_usd!=null?x.ind.pipeline_usd:null)})), {color:'#BA7517', fmt:_fmtC})+'<div class="help" style="font-size:11px;margin-top:2px">Solo desde el primer cierre real.</div>'));
   return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">'+cards.join('')+'</div>';
 }
+<<<<<<< Updated upstream
 /* ================= AGENDA ================= */
 // Unifica en una sola vista los vencimientos comerciales que hoy viven repartidos
 // por el CRM: el próximo paso de cada oportunidad, su fecha límite, y el
@@ -5706,6 +5751,38 @@ async function recordatoriosAlAbrir(redibujar){
     _recordatorioAbierto = true;
     try{ localStorage.setItem(clave, todayISO()); }catch(_){}
   }catch(_){ /* un recordatorio nunca debe romper el arranque de la app */ }
+=======
+// Matriz de cruce: mes en que se GANÓ (filas) x mes en que se COTIZÓ (columnas).
+// Permite ver, p. ej., que una venta ganada en septiembre se había cotizado en julio.
+function matrizCruce(unidad){
+  let ganadas;
+  if(unidad==='ventas'){
+    ganadas = quotesVentasUlt().filter(x=> x.state==='ganada')
+      .map(x=>({ gan:(x.fechaEstado||x.created), cot:oeOrigenTs(x) }));
+  } else {
+    ganadas = DB.quotes.filter(x=> x.unidad!=='ventas' && x.state==='ganada')
+      .map(x=>({ gan:(x.fechaEstado||x.created), cot:x.created }));
+  }
+  ganadas = ganadas.filter(g=> g.gan && g.cot);
+  if(!ganadas.length) return '<div class="help" style="padding:10px 2px">Todavía no hay cotizaciones ganadas para cruzar en '+unidad+'.</div>';
+  const mesesCot = [...new Set(ganadas.map(g=> monthKey(g.cot)))].sort();
+  const mesesGan = [...new Set(ganadas.map(g=> monthKey(g.gan)))].sort();
+  const cell = {};
+  ganadas.forEach(g=>{ const k=monthKey(g.gan)+'|'+monthKey(g.cot); cell[k]=(cell[k]||0)+1; });
+  const th = '<th class="nowrap">Ganada \\ Cotizada</th>'+mesesCot.map(c=>`<th class="r nowrap">${nombreMesCorto(c)}</th>`).join('')+'<th class="r">Total</th>';
+  const rows = mesesGan.slice().reverse().map(r=>{
+    let tot=0;
+    const tds = mesesCot.map(c=>{ const v=cell[r+'|'+c]||0; tot+=v; const same=(r===c);
+      const style = same ? ' style="background:#eef4ea;font-weight:700;color:#4f8a53"' : (v? '' : ' style="color:#c4c0b4"');
+      return `<td class="r nowrap"${style}>${v||'·'}</td>`; }).join('');
+    return `<tr><td class="nowrap"><b>${nombreMesCorto(r)}</b></td>${tds}<td class="r nowrap"><b>${tot}</b></td></tr>`;
+  }).join('');
+  const totCol = mesesCot.map(c=> ganadas.filter(g=> monthKey(g.cot)===c).length);
+  const totRow = '<tr style="border-top:2px solid var(--line)"><td class="nowrap"><b>Total</b></td>'+
+    totCol.map(v=>`<td class="r nowrap"><b>${v}</b></td>`).join('')+`<td class="r nowrap"><b>${ganadas.length}</b></td></tr>`;
+  return `<div style="overflow-x:auto"><table class="grid"><thead><tr>${th}</tr></thead><tbody>${rows}${totRow}</tbody></table></div>
+    <div class="help" style="font-size:11px;margin-top:6px">Filas = mes en que se <b>ganó</b>. Columnas = mes en que se <b>cotizó</b> (origen de la OE). La diagonal resaltada = cotizada y ganada el mismo mes; a la izquierda de la diagonal, ganadas que venían de cotizaciones de meses anteriores.</div>`;
+>>>>>>> Stashed changes
 }
 
 VIEWS.cierres = function(){
@@ -5730,6 +5807,11 @@ VIEWS.cierres = function(){
         </div>
       </div>
       ${graficasCierres(cierresGrafUnidad)}
+    </div></div>
+    <div class="card"><div class="card-b">
+      <div style="font-size:15px;font-weight:700;color:#37432c;margin-bottom:4px">Cruce cotizada → ganada · ${cierresGrafUnidad==='rental'?'Rental':'Ventas'}</div>
+      <div class="help" style="margin-bottom:12px">Usa el selector Rental/Ventas de arriba. Cuántas cotizaciones ganadas en cada mes venían de cotizaciones de meses anteriores.</div>
+      ${matrizCruce(cierresGrafUnidad)}
     </div></div>
     <div class="card"><div class="card-b">
       <div style="font-size:15px;font-weight:700;color:#37432c;margin-bottom:10px">Rental</div>
