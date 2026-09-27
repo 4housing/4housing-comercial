@@ -1194,7 +1194,7 @@ VIEWS.dashboard = function(){
     { key:'cotsHoy', label:'Cotizaciones nuevas hoy', value:cotsHoy.length, target:null,
       fn:x=>x.created && x.created>=hoy0, sub:'Cargadas hoy' },
     { key:'oppsHoy', label:'Oportunidades nuevas hoy', value:oppsRentalHoy, target:null,
-      info:true, sub:'Oportunidades de rental cargadas hoy' },
+      opps:true, sub:'Oportunidades de rental cargadas hoy' },
     { key:'totales', label:'Cotizaciones totales', value:q.length, target:null,
       fn:()=>true, sub:'Total histórico' },
     { key:'vigentes', label:'Cotizaciones vigentes', value:vigentes.length, target:30,
@@ -1242,10 +1242,18 @@ VIEWS.dashboard = function(){
   }).join('');
 
   // lista filtrada abajo
+  const esOppsHoy = !!(dashFilter && dashFilter.key==='oppsHoy');
   let listed = [...q].sort((a,b)=>b.created-a.created);
   let listTitle = 'Cotizaciones recientes';
   if(filtroVendedor) listed = listed.filter(x=>x.comercial===filtroVendedor);
-  if(dashFilter){
+  // Oportunidades de rental cargadas hoy (drill-down del indicador oppsHoy)
+  let oppsListed = [];
+  if(esOppsHoy){
+    oppsListed = DB.opps.filter(o=> (o.unidad==='rental'||o.unidad==='ambas') && o.created && o.created>=hoy0);
+    if(filtroVendedor) oppsListed = oppsListed.filter(o=> o.comercial===filtroVendedor);
+    oppsListed.sort((a,b)=> b.created-a.created);
+    listTitle = 'Oportunidades nuevas hoy (' + oppsListed.length + ')';
+  } else if(dashFilter){
     const c = cards.find(x=>x.key===dashFilter.key);
     if(c && typeof c.fn==='function'){
       listed = listed.filter(c.fn);
@@ -1271,11 +1279,17 @@ VIEWS.dashboard = function(){
           <button class="btn" onclick="newQuote()">${ICO.plus} Nueva cotización</button>
         </div>
       </div>
-      ${listed.length? `<table class="grid">
-        <thead><tr><th>Ref.</th><th>Cliente</th><th>Atención</th><th>Comercial</th><th>Estado</th><th class="r">Total</th><th class="r">Fecha</th></tr></thead>
-        <tbody>${groupQuotes(listed).map(rowGroupDash).join('')}</tbody></table>`
-        : emptyState('Sin cotizaciones','No hay cotizaciones para este indicador.')}
+      ${esOppsHoy
+        ? (oppsListed.length? `<table class="grid">
+            <thead><tr><th>Ref.</th><th>Cliente / Organismo</th><th>Tipo</th><th>Prioridad</th><th>Estado</th><th>Fecha límite</th><th class="r">Valor</th></tr></thead>
+            <tbody>${oppsListed.map(rowOpp).join('')}</tbody></table>`
+          : emptyState('Sin oportunidades','No hay oportunidades de rental cargadas hoy.'))
+        : (listed.length? `<table class="grid">
+            <thead><tr><th>Ref.</th><th>Cliente</th><th>Atención</th><th>Comercial</th><th>Estado</th><th class="r">Total</th><th class="r">Fecha</th></tr></thead>
+            <tbody>${groupQuotes(listed).map(rowGroupDash).join('')}</tbody></table>`
+          : emptyState('Sin cotizaciones','No hay cotizaciones para este indicador.'))}
     </div></div>`;
+  if(esOppsHoy){ C().querySelectorAll('tr.clickable').forEach(tr=> tr.onclick=()=> openOpp(tr.dataset.id)); }
   { const v=document.getElementById('dVend'); if(v) v.onchange=()=>{ filtroVendedor=v.value; VIEWS.dashboard(); }; }
 };
 function dashSelect(key){
@@ -2931,7 +2945,7 @@ VIEWS.dashboard_ventas = function(){
   const f = ventasPanelFiltro;
   // Modo cotización: los indicadores que hablan de OE muestran cotizaciones;
   // el resto muestra oportunidades vigentes (sin cotizar).
-  const modoCotiz = (f==='enviada' || f==='cotizadas_mes' || f==='ganada');
+  const modoCotiz = (f==='enviada' || f==='cotizadas_mes' || f==='ganada' || f==='cerradas_mes' || f==='cerradas' || f==='pipeline');
 
   let bodyHtml, tituloLista, subLista;
   if(modoCotiz){
@@ -2940,10 +2954,13 @@ VIEWS.dashboard_ventas = function(){
     if(f==='enviada')            qs = qs.filter(q=> q.state==='enviada');
     else if(f==='ganada')        qs = qs.filter(q=> q.state==='ganada' && monthKey(q.fechaEstado||q.created)===curMonthKey());
     else if(f==='cotizadas_mes') qs = qs.filter(q=> ['enviada','negociacion','ganada','perdida'].includes(q.state) && q.created>=startOfMonthTs());
+    else if(f==='cerradas_mes')  qs = qs.filter(q=> (q.state==='ganada'||q.state==='perdida') && monthKey(q.fechaEstado||q.created)===curMonthKey());
+    else if(f==='cerradas')      qs = qs.filter(q=> q.state==='ganada' || q.state==='perdida');
+    else if(f==='pipeline')      qs = qs.filter(q=> ['borrador','enviada','negociacion'].includes(q.state));
     // Ganadas del mes: ordenar por fecha de cierre (fecha_estado); el resto por creación.
     if(f==='ganada') qs.sort((a,b)=> (b.fechaEstado||b.created)-(a.fechaEstado||a.created));
     else             qs.sort((a,b)=> b.created-a.created);
-    tituloLista = 'Cotizaciones · ' + ({enviada:'a la espera', ganada:'ganadas del mes', cotizadas_mes:'del mes'}[f]||'');
+    tituloLista = 'Cotizaciones · ' + ({enviada:'a la espera', ganada:'ganadas del mes', cotizadas_mes:'del mes', cerradas_mes:'cerradas del mes (ganadas + perdidas)', cerradas:'cerradas (histórico)', pipeline:'en pipeline'}[f]||'');
     subLista = 'Tocá de nuevo el indicador para quitar el filtro';
     if(f==='ganada'){
       // Vista con el cruce cotizada→ganada por negocio.
@@ -2981,9 +2998,9 @@ VIEWS.dashboard_ventas = function(){
       ${kpiCard('Cotizadas a la espera', k.cotizadas, 20, 'Esperando respuesta · obj. 20', {onclick:"toggleVentasFiltro('enviada')", active:f==='enviada'})}
       ${kpiCard('Cotizadas (mes)', k.cotizadasMes, 20, 'Generadas este mes · obj. 20', {onclick:"toggleVentasFiltro('cotizadas_mes')", active:f==='cotizadas_mes'})}
       ${kpiCard('Ganadas (mes)', k.ganadasMes, 2, 'Ganadas este mes (por fecha de cierre) · obj. 2', {onclick:"toggleVentasFiltro('ganada')", active:f==='ganada'})}
-      ${kpiCard('Conversión (mes)', k.convMes, 10, 'Ganadas / cerradas del mes · obj. 10%', {pct:true})}
-      ${kpiCard('Conversión (histórica)', k.conv, 10, 'Ganadas / cerradas de todo el histórico', {pct:true})}
-      ${kpiCard('Pipeline', (k.pipeline?('USD '+fmt(k.pipeline)):'—'), 0, 'Cotizaciones en borrador, enviadas o en negociación (USD)'+(k.pipelineArs?(' · + $ '+fmt(k.pipelineArs)+' ARS'):''))}
+      ${kpiCard('Conversión (mes)', k.convMes, 10, 'Ganadas / cerradas del mes · obj. 10%', {pct:true, onclick:"toggleVentasFiltro('cerradas_mes')", active:f==='cerradas_mes'})}
+      ${kpiCard('Conversión (histórica)', k.conv, 10, 'Ganadas / cerradas de todo el histórico', {pct:true, onclick:"toggleVentasFiltro('cerradas')", active:f==='cerradas'})}
+      ${kpiCard('Pipeline', (k.pipeline?('USD '+fmt(k.pipeline)):'—'), 0, 'Cotizaciones en borrador, enviadas o en negociación (USD)'+(k.pipelineArs?(' · + $ '+fmt(k.pipelineArs)+' ARS'):''), {onclick:"toggleVentasFiltro('pipeline')", active:f==='pipeline'})}
     </div>
     <div class="card"><div class="card-b" style="padding:0">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--line)">
