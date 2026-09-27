@@ -5205,7 +5205,6 @@ function graficasCierres(unidad){
   if(unidad==='ventas') cards.push(_chartCard('Pipeline por mes (USD)', _svgArea(s.map(x=>({label:L(x.periodo), value:(x.ind.pipeline_usd!=null?x.ind.pipeline_usd:null)})), {color:'#BA7517', fmt:_fmtC})+'<div class="help" style="font-size:11px;margin-top:2px">Solo desde el primer cierre real.</div>'));
   return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">'+cards.join('')+'</div>';
 }
-<<<<<<< Updated upstream
 /* ================= AGENDA ================= */
 // Unifica en una sola vista los vencimientos comerciales que hoy viven repartidos
 // por el CRM: el próximo paso de cada oportunidad, su fecha límite, y el
@@ -5751,7 +5750,7 @@ async function recordatoriosAlAbrir(redibujar){
     _recordatorioAbierto = true;
     try{ localStorage.setItem(clave, todayISO()); }catch(_){}
   }catch(_){ /* un recordatorio nunca debe romper el arranque de la app */ }
-=======
+}
 // Matriz de cruce: mes en que se GANÓ (filas) x mes en que se COTIZÓ (columnas).
 // Permite ver, p. ej., que una venta ganada en septiembre se había cotizado en julio.
 function matrizCruce(unidad){
@@ -5782,7 +5781,6 @@ function matrizCruce(unidad){
     totCol.map(v=>`<td class="r nowrap"><b>${v}</b></td>`).join('')+`<td class="r nowrap"><b>${ganadas.length}</b></td></tr>`;
   return `<div style="overflow-x:auto"><table class="grid"><thead><tr>${th}</tr></thead><tbody>${rows}${totRow}</tbody></table></div>
     <div class="help" style="font-size:11px;margin-top:6px">Filas = mes en que se <b>ganó</b>. Columnas = mes en que se <b>cotizó</b> (origen de la OE). La diagonal resaltada = cotizada y ganada el mismo mes; a la izquierda de la diagonal, ganadas que venían de cotizaciones de meses anteriores.</div>`;
->>>>>>> Stashed changes
 }
 
 VIEWS.cierres = function(){
