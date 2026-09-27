@@ -670,6 +670,14 @@ const sbClient = window.supabase.createClient(SB_URL, SB_KEY);
 
 // Cliente REST mínimo (sin librerías externas; usa fetch nativo)
 async function sbFetch(path, opts={}, _retry=false){
+  // Guard de edición por sección (Etapa 2): bloquea escrituras si la sección
+  // (vista) actual no es editable para el usuario. Lecturas (GET/HEAD) siempre
+  // pasan; los cierres mensuales son automáticos y se permiten siempre.
+  const _m = (opts.method||'GET').toUpperCase();
+  if(_m!=='GET' && _m!=='HEAD' && typeof comEdicionActual==='function' && !comEdicionActual() && !/^\/cierres_mensuales/.test(path)){
+    try{ if(typeof toast==='function') toast('Solo lectura: no tenés permiso para editar esta sección.'); }catch(e){}
+    throw new Error('Solo lectura: no tenés permiso de edición en esta sección.');
+  }
   // Token de la sesión actual, si el usuario está logueado.
   let token = '';
   try{
@@ -1123,9 +1131,60 @@ function go(view){
   current=view;
   document.querySelectorAll('.navbtn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
   VIEWS[view]();
+  actualizarBannerSoloLecturaCom();
 }
-function refreshCurrent(){ if(VIEWS[current]) VIEWS[current](); }
+function refreshCurrent(){ if(VIEWS[current]) VIEWS[current](); actualizarBannerSoloLecturaCom(); }
 document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>go(b.dataset.view));
+
+// ===== Etapa 2 · Permisos por sección (Ver / Editar) =====
+// Sin config guardada = acceso total (retrocompatible; hoy todo interno logueado
+// ve y edita todo). Dirección ve/edita todo. 'lector' no edita.
+let _perfilCom = null; // { esDir, rol, ver, editar } | null
+const SECCIONES_REPORTE_COM = new Set(['dashboard','dashboard_ventas','audit','cierres']); // sin edición → sin cartel
+function _comVerSet(){ if(!_perfilCom||_perfilCom.esDir) return null; if(Array.isArray(_perfilCom.ver)) return new Set(_perfilCom.ver); return null; }
+function _comEditSet(){ if(!_perfilCom||_perfilCom.esDir) return null; if(_perfilCom.rol==='lector'||_perfilCom.rol==='lectura') return new Set(); if(Array.isArray(_perfilCom.editar)) return new Set(_perfilCom.editar); return null; }
+function comPuedeVer(sec){ if(!sec) return true; const s=_comVerSet(); return s===null||s.has(sec); }
+function comPuedeEditar(sec){ if(!sec) return true; const s=_comEditSet(); return s===null||s.has(sec); }
+function comEdicionActual(){ return comPuedeEditar(current); }
+async function cargarPerfilComercial(){
+  _perfilCom=null;
+  try{
+    const uid = AUTH_USER && AUTH_USER.id; if(!uid) return;
+    const pr = await sbFetch('/perfiles?id=eq.'+uid+'&select=activo,es_direccion');
+    const perf = Array.isArray(pr)&&pr[0] ? pr[0] : null;
+    const sr = await sbFetch('/perfiles_sector?perfil_id=eq.'+uid+'&sector=eq.fhcomercial&select=cargo,permisos');
+    const ps = Array.isArray(sr)&&sr[0] ? sr[0] : null;
+    const esDir = !!(perf && perf.es_direccion);
+    const perm = (ps && ps.permisos) || {};
+    _perfilCom = { esDir, rol: esDir?'admin':(ps?ps.cargo:null),
+                   ver: Array.isArray(perm.ver)?perm.ver:null,
+                   editar: Array.isArray(perm.editar)?perm.editar:null };
+  }catch(e){ console.warn('cargarPerfilComercial:', e); _perfilCom=null; }
+}
+// Oculta del menú las vistas sin permiso de visión; si la actual queda oculta,
+// salta a la primera visible.
+function aplicarVisibilidadVistas(){
+  const btns = Array.prototype.slice.call(document.querySelectorAll('.navbtn'));
+  let firstVisible=null;
+  btns.forEach(b=>{ const sec=b.dataset.view; const ok=comPuedeVer(sec); b.style.display = ok?'':'none'; if(ok&&!firstVisible) firstVisible=sec; });
+  if(!comPuedeVer(current) && firstVisible){ go(firstVisible); return; }
+  actualizarBannerSoloLecturaCom();
+}
+// Cartel "solo lectura" arriba del contenido de la vista actual.
+function actualizarBannerSoloLecturaCom(){
+  const mostrar = current && !SECCIONES_REPORTE_COM.has(current) && !comPuedeEditar(current);
+  let b = document.getElementById('banner-solo-lectura-com');
+  if(!mostrar){ if(b) b.style.display='none'; return; }
+  const host = document.getElementById('content');
+  if(!b){
+    b=document.createElement('div');
+    b.id='banner-solo-lectura-com';
+    b.style.cssText='background:#FCF4E6;border:1px solid #E9D8B0;color:#8A6D1F;border-radius:9px;padding:8px 12px;margin:0 0 12px;font-size:13px';
+    b.textContent='👁 Solo lectura — podés ver esta sección pero no editarla. Si necesitás editar, pedile acceso a dirección.';
+  }
+  if(host && b.parentNode!==host) host.insertBefore(b, host.firstChild);
+  b.style.display='';
+}
 function setHeader(title,sub,actions){
   document.getElementById('pageTitle').textContent=title;
   document.getElementById('pageSub').textContent=sub||'';
@@ -5843,6 +5902,7 @@ VIEWS.cierres = function(){
 (async function start(){
   const ok = await initAuth();
   if(!ok) return; // la pantalla de login ya se mostró
+  try{ await cargarPerfilComercial(); }catch(_){ /* sin perfil = acceso total (retrocompatible) */ }
   // Mostrar usuario y cablear logout
   const lbl = document.getElementById('autosaveLbl');
   if(lbl && AUTH_USER) lbl.textContent = (AUTH_USER.user_metadata && (AUTH_USER.user_metadata.name || AUTH_USER.user_metadata.full_name)) || AUTH_USER.email || 'Conectado';
@@ -5857,6 +5917,7 @@ VIEWS.cierres = function(){
     await reloadDB();
     try{ await cerrarMesesPendientes(); }catch(_){ /* el cierre es best-effort, no debe romper el arranque */ }
     go('dashboard');
+    aplicarVisibilidadVistas(); // Etapa 2: ocultar vistas sin permiso de visión
     recordatoriosAlAbrir(); // avisa lo vencido/de hoy al comercial logueado (1 vez por día)
   }catch(e){
     if(c) c.innerHTML = '<div class="empty"><div style="font-weight:600;color:#b4554e">No se pudo conectar con la base de datos</div>'
