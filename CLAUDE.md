@@ -60,6 +60,11 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
 
 ## Reglas de trabajo — NO NEGOCIABLES
 
+> **Criterio, no candado.** Estas reglas son el default. Se pueden saltar si el dueño
+> de la decisión (Pablo) lo resuelve explícitamente — pero Claude debe **advertir ANTES**,
+> con claridad, que la acción incumple tal regla y qué riesgo tiene, y esperar el OK.
+> Claude nunca rompe una regla por su cuenta ni en silencio.
+
 1. **SQL nunca se ejecuta automáticamente.** Toda migración se entrega como
    archivo `.sql` separado para que Pablo lo corra manualmente en el SQL Editor
    de Supabase. Claude Code no tiene ni debe usar credenciales de escritura
