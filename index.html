@@ -1347,9 +1347,11 @@ VIEWS.dashboard = function(){
             <thead><tr><th>Ref.</th><th>Cliente</th><th>Atención</th><th>Comercial</th><th>Estado</th><th class="r">Total</th><th class="r">Fecha</th></tr></thead>
             <tbody>${groupQuotes(listed).map(rowGroupDash).join('')}</tbody></table>`
           : emptyState('Sin cotizaciones','No hay cotizaciones para este indicador.'))}
-    </div></div>`;
+    </div></div>
+    ${panelEvolucion('rental')}`;
   if(esOppsHoy){ C().querySelectorAll('tr.clickable').forEach(tr=> tr.onclick=()=> openOpp(tr.dataset.id)); }
   { const v=document.getElementById('dVend'); if(v) v.onchange=()=>{ filtroVendedor=v.value; VIEWS.dashboard(); }; }
+  try{ requestAnimationFrame(_evoWire); }catch(_){ }
 };
 function dashSelect(key){
   if(!key || (dashFilter && dashFilter.key===key)) dashFilter=null;
@@ -3070,9 +3072,11 @@ VIEWS.dashboard_ventas = function(){
         <button class="btn" onclick="newOppVentas()">${ICO.plus} Nueva oportunidad</button>
       </div>
       ${bodyHtml}
-    </div></div>`;
+    </div></div>
+    ${panelEvolucion('ventas')}`;
   const abre = modoCotiz ? (id)=>editQuote(id) : (id)=>openOpp(id);
   C().querySelectorAll('tr.clickable').forEach(tr=> tr.onclick=()=> abre(tr.dataset.id));
+  try{ requestAnimationFrame(_evoWire); }catch(_){ }
 };
 
 function toggleVentasFiltro(f){
@@ -5349,6 +5353,15 @@ function graficasCierres(unidad){
       series:[{name:'Pipeline', vals:s.map(x=>x.ind.pipeline_usd!=null?x.ind.pipeline_usd:null), color:EVO_SLATE, area:true}] }));
   }
   return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px">'+cards.join('')+'</div>';
+}
+// Bloque de evolución para embeber en Panel Rental / Panel Ventas (misma línea visual).
+// No agranda la fila de indicadores: es una sección aparte al pie del panel.
+function panelEvolucion(unidad){
+  if(!(DB.cierres||[]).some(c=> c.unidad===unidad)) return '';
+  return '<div class="card" style="margin-top:16px"><div class="card-b">'
+    +'<div style="font-size:15px;font-weight:700;color:#37432c;margin-bottom:2px">Evolución</div>'
+    +'<div class="help" style="margin-bottom:12px">Cierres mensuales de '+(unidad==='ventas'?'Ventas':'Rental')+'.</div>'
+    +graficasCierres(unidad)+'</div></div>';
 }
 /* ================= AGENDA ================= */
 // Unifica en una sola vista los vencimientos comerciales que hoy viven repartidos
