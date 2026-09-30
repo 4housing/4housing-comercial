@@ -5270,16 +5270,85 @@ function _chartCard(titulo, svg, legend){
 function _serieCierres(unidad){
   return (DB.cierres||[]).filter(c=> c.unidad===unidad).sort((a,b)=> a.periodo<b.periodo?-1:1).map(c=>({ periodo:c.periodo, ind:c.indicadores||{} }));
 }
+/* ---- Motor de gráficos de evolución v2: curvas suaves + animación de entrada +
+       crosshair con tooltip de series superpuestas + semáforo (0 rojo / >0 amarillo /
+       >=objetivo verde). SVG a mano, sin librerías. ---- */
+const EVO_W=440,EVO_H=176,EVO_pL=44,EVO_pR=58,EVO_pT=18,EVO_pB=26;
+const EVO_GRN=['#2F8F63','#1E6B49'],EVO_AMB=['#CBA13A','#8A6D18'],EVO_RED=['#C25A4E','#8F3A30'];
+const EVO_TEAL='#2F8F63',EVO_REDL='#C25A4E',EVO_SLATE='#9AA6A0';
+window.__EVO={};
+function _evoFmt(kind){ if(kind==='money')return v=>_fmtC(v); if(kind==='pct')return v=>Math.round(v)+'%'; return v=>Math.round(v).toLocaleString('es-AR'); }
+function _evoStat(v,obj){ if(v<=0)return EVO_RED; if(obj!=null && v<obj)return EVO_AMB; return EVO_GRN; }
+function _evoSmooth(P){ if(!P.length)return''; if(P.length===1)return'M'+P[0].x+','+P[0].y; let d='M'+P[0].x+','+P[0].y; for(let i=0;i<P.length-1;i++){ const p0=P[i-1]||P[i],p1=P[i],p2=P[i+1],p3=P[i+2]||P[i+1]; d+='C'+(p1.x+(p2.x-p0.x)/6).toFixed(1)+','+(p1.y+(p2.y-p0.y)/6).toFixed(1)+' '+(p2.x-(p3.x-p1.x)/6).toFixed(1)+','+(p2.y-(p3.y-p1.y)/6).toFixed(1)+' '+p2.x.toFixed(1)+','+p2.y.toFixed(1); } return d; }
+function _evoX(i,n){ return EVO_pL+(n===1?(EVO_W-EVO_pL-EVO_pR)/2:(EVO_W-EVO_pL-EVO_pR)*i/(n-1)); }
+function _evoY(v,nm){ return EVO_pT+(EVO_H-EVO_pT-EVO_pB)*(1-v/nm); }
+function _evoChart(id,cfg){
+  const n=cfg.meses.length, fmt=_evoFmt(cfg.fmtKind), suf=cfg.suffix||'';
+  const primaryIdx=Math.max(0,cfg.series.findIndex(se=>se.primary));
+  let allv=cfg.series.flatMap(se=>se.vals.filter(v=>v!=null&&isFinite(v))); if(cfg.obj!=null)allv.push(cfg.obj);
+  const nm=cfg.max||_niceMax(Math.max(1,...(allv.length?allv:[1])));
+  const baseY=EVO_pT+(EVO_H-EVO_pT-EVO_pB);
+  let g='';
+  [0,0.5,1].forEach(t=>{ const y=EVO_pT+(EVO_H-EVO_pT-EVO_pB)*(1-t); g+='<line x1="'+EVO_pL+'" y1="'+y.toFixed(1)+'" x2="'+(EVO_W-EVO_pR)+'" y2="'+y.toFixed(1)+'" stroke="#EEECE4"/><text x="'+(EVO_pL-6)+'" y="'+(y+3).toFixed(1)+'" text-anchor="end" font-size="9" fill="#A8A69E">'+fmt(nm*t)+suf+'</text>'; });
+  cfg.meses.forEach((m,i)=>{ g+='<text x="'+_evoX(i,n).toFixed(1)+'" y="'+(EVO_H-8)+'" text-anchor="middle" font-size="9.5" fill="#888780">'+m+'</text>'; });
+  // objetivo
+  const labels=[];
+  if(cfg.obj!=null){ const oy=_evoY(cfg.obj,nm); g+='<line x1="'+EVO_pL+'" y1="'+oy.toFixed(1)+'" x2="'+(EVO_W-EVO_pR)+'" y2="'+oy.toFixed(1)+'" stroke="#B9B7AC" stroke-width="1.4" stroke-dasharray="4 3"/>'; labels.push({y:oy,txt:'obj '+fmt(cfg.obj)+suf,color:'#8f8d84'}); }
+  // series
+  cfg.series.forEach((se,si)=>{ const P=[]; se.vals.forEach((v,i)=>{ if(v!=null&&isFinite(v))P.push({x:_evoX(i,n),y:_evoY(+v,nm),i}); }); if(!P.length)return; const path=_evoSmooth(P);
+    if(se.area){ const ap=path+' L'+P[P.length-1].x.toFixed(1)+','+baseY.toFixed(1)+' L'+P[0].x.toFixed(1)+','+baseY.toFixed(1)+' Z'; g+='<path class="evo-ar" d="'+ap+'" fill="'+se.color+'" fill-opacity="0" data-op="0.12"/>'; }
+    g+='<path class="evo-ln" data-dash="'+(se.dash?'5 4':'')+'" d="'+path+'" fill="none" stroke="'+se.color+'" stroke-width="'+(se.dash?2:2.75)+'"'+(se.dash?' stroke-dasharray="5 4"':'')+' stroke-linecap="round" stroke-linejoin="round"/>';
+    const last=P[P.length-1], lv=se.vals[last.i]; let col=se.color; if(si===primaryIdx&&cfg.sema)col=_evoStat(lv,cfg.obj)[1];
+    g+='<circle cx="'+last.x.toFixed(1)+'" cy="'+last.y.toFixed(1)+'" r="3.4" fill="'+se.color+'" stroke="#fff" stroke-width="2"/>';
+    labels.push({y:last.y,txt:fmt(lv)+suf,color:col,x:last.x}); });
+  // de-colisión de etiquetas de la derecha
+  labels.sort((a,b)=>a.y-b.y); for(let i=1;i<labels.length;i++){ if(labels[i].y-labels[i-1].y<12)labels[i].y=labels[i-1].y+12; }
+  labels.forEach(L=>{ const yy=Math.max(EVO_pT+4,Math.min(baseY,L.y)); g+='<text x="'+(EVO_W-EVO_pR+7)+'" y="'+(yy+3).toFixed(1)+'" font-size="10.5" font-weight="600" fill="'+L.color+'">'+L.txt+'</text>'; });
+  // crosshair
+  g+='<line class="evo-hx" x1="0" y1="'+EVO_pT+'" x2="0" y2="'+baseY+'" stroke="#B9B7AC" stroke-dasharray="3 3" opacity="0"/>';
+  cfg.series.forEach((se,si)=>{ g+='<circle class="evo-hd" data-s="'+si+'" r="4" fill="'+se.color+'" stroke="#fff" stroke-width="2" opacity="0"/>'; });
+  g+='<rect data-evo-hit="'+id+'" x="'+EVO_pL+'" y="'+EVO_pT+'" width="'+(EVO_W-EVO_pL-EVO_pR)+'" height="'+(EVO_H-EVO_pT-EVO_pB)+'" fill="transparent" style="cursor:crosshair"/>';
+  window.__EVO[id]={ meses:cfg.meses, series:cfg.series.map(se=>({name:se.name,color:se.color,vals:se.vals})), nm, obj:cfg.obj!=null?cfg.obj:null, fmtKind:cfg.fmtKind, suffix:suf, sema:!!cfg.sema, primaryIdx };
+  const dot = cfg.sema ? '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:'+_evoStat(cfg.series[primaryIdx].vals[n-1]||0,cfg.obj)[0]+'"></span>' : '';
+  const leg = cfg.series.length>1 ? '<div style="display:flex;gap:14px;font-size:11px;color:#888780;margin-top:2px">'+cfg.series.map(se=>'<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+se.color+';margin-right:4px"></span>'+se.name+'</span>').join('')+'</div>' : '';
+  const svg='<svg viewBox="0 0 '+EVO_W+' '+EVO_H+'" width="100%" style="max-width:100%;height:auto;display:block" role="img">'+g+'</svg>';
+  return '<div style="border:1px solid var(--line);border-radius:12px;padding:10px 12px"><div style="font-size:12.5px;font-weight:600;color:#37432c;display:flex;align-items:center">'+dot+cfg.titulo+'</div>'+leg+'<div style="position:relative;margin-top:4px">'+svg+'<div data-evo-tt="'+id+'" style="position:absolute;pointer-events:none;background:#fff;border:1px solid #E2DFD4;border-radius:9px;padding:7px 10px;font-size:12px;color:#37432c;display:none;z-index:5;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.08)"></div></div>'+(cfg.nota?'<div class="help" style="font-size:11px;margin-top:2px">'+cfg.nota+'</div>':'')+'</div>';
+}
+function _evoWire(){
+  document.querySelectorAll('[data-evo-hit]').forEach(hit=>{
+    const id=hit.getAttribute('data-evo-hit'); const cfg=window.__EVO&&window.__EVO[id]; if(!cfg)return;
+    const svg=hit.closest('svg'), wrap=svg.parentNode, tt=wrap.querySelector('[data-evo-tt="'+id+'"]'); if(!tt)return;
+    svg.querySelectorAll('path.evo-ln').forEach(ln=>{ try{ const Ln=ln.getTotalLength(); const dash=ln.getAttribute('data-dash'); ln.style.strokeDasharray=Ln; ln.style.strokeDashoffset=Ln; ln.getBoundingClientRect(); ln.style.transition='stroke-dashoffset 900ms cubic-bezier(.4,0,.2,1)'; ln.style.strokeDashoffset=0; if(dash){ setTimeout(()=>{ ln.style.transition='none'; ln.style.strokeDasharray=dash; ln.style.strokeDashoffset=0; },960); } }catch(e){} });
+    svg.querySelectorAll('path.evo-ar').forEach(a=>{ a.style.transition='fill-opacity 800ms ease 250ms'; requestAnimationFrame(()=>a.setAttribute('fill-opacity', a.getAttribute('data-op')||'0.12')); });
+    const fmt=_evoFmt(cfg.fmtKind), suf=cfg.suffix||'', n=cfg.meses.length;
+    const hx=svg.querySelector('.evo-hx'), hds=[...svg.querySelectorAll('.evo-hd')];
+    hit.onmousemove=e=>{ const r=svg.getBoundingClientRect(); const px=(e.clientX-r.left)/r.width*EVO_W; let i=Math.round((px-EVO_pL)/(EVO_W-EVO_pL-EVO_pR)*(n-1)); i=Math.max(0,Math.min(n-1,i)); const x=_evoX(i,n); hx.setAttribute('x1',x); hx.setAttribute('x2',x); hx.setAttribute('opacity','1');
+      let rows=cfg.series.map((se,si)=>{ const v=se.vals[i]; if(v==null||!isFinite(v)){ hds[si]&&hds[si].setAttribute('opacity','0'); return '<div style="display:flex;align-items:center;gap:6px;margin-top:2px"><span style="width:8px;height:8px;border-radius:2px;background:'+se.color+'"></span><span style="color:#888780">'+se.name+'</span><b style="margin-left:auto;padding-left:14px;color:#37432c">—</b></div>'; } if(hds[si]){ hds[si].setAttribute('cx',x); hds[si].setAttribute('cy',_evoY(+v,cfg.nm)); hds[si].setAttribute('opacity','1'); } return '<div style="display:flex;align-items:center;gap:6px;margin-top:2px"><span style="width:8px;height:8px;border-radius:2px;background:'+se.color+'"></span><span style="color:#888780">'+se.name+'</span><b style="margin-left:auto;padding-left:14px;color:#37432c">'+fmt(v)+suf+'</b></div>'; }).join('');
+      if(cfg.sema){ const pv=cfg.series[cfg.primaryIdx].vals[i]; const pvn=(pv==null||!isFinite(pv))?0:+pv; const st=_evoStat(pvn,cfg.obj); const txt = pvn<=0?'Sin registros':((cfg.obj!=null&&pvn<cfg.obj)?('Debajo del objetivo ('+fmt(cfg.obj)+suf+')'):(cfg.obj!=null?'Objetivo cumplido':'')); if(txt) rows+='<div style="margin-top:5px;padding-top:5px;border-top:1px solid #EEECE4;color:'+st[1]+';font-weight:600">'+txt+'</div>'; }
+      tt.innerHTML='<div style="font-weight:600;margin-bottom:3px">'+cfg.meses[i]+'</div>'+rows; tt.style.display='block'; const bx=wrap.getBoundingClientRect(); let lft=(x/EVO_W)*bx.width+12; if(lft>bx.width-160)lft-=180; tt.style.left=Math.max(4,lft)+'px'; tt.style.top='2px'; };
+    hit.onmouseleave=()=>{ hx.setAttribute('opacity','0'); hds.forEach(d=>d.setAttribute('opacity','0')); tt.style.display='none'; };
+  });
+}
 function graficasCierres(unidad){
   const s=_serieCierres(unidad); if(!s.length) return '<div class="help" style="padding:10px 2px">Todavía no hay cierres para graficar. Generá o esperá el primer cierre.</div>';
-  const L=p=>nombreMesCorto(p); const cards=[];
-  if(unidad==='ventas') cards.push(_chartCard('Monto cotizado por mes (USD)', _svgArea(s.map(x=>({label:L(x.periodo), value:x.ind.monto_cotizado_usd||0})), {color:'#185FA5', fmt:_fmtC})));
-  cards.push(_chartCard('Cotizaciones emitidas por mes', _svgBars(s.map(x=>({label:L(x.periodo), value:x.ind.cotizaciones_mes||0})), {color:'#5f7a4e'})));
-  const legGP='<div style="display:flex;gap:14px;font-size:11px;color:#888780;margin-top:1px"><span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#0F6E56;margin-right:4px"></span>Ganadas</span><span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#A32D2D;margin-right:4px"></span>Perdidas</span></div>';
-  cards.push(_chartCard('Ganadas vs perdidas por mes', _svgGrouped(s.map(x=>({label:L(x.periodo), values:[x.ind.ganadas_mes||0, x.ind.perdidas_mes||0]})), {colors:['#0F6E56','#A32D2D'], names:['Ganadas','Perdidas']}), legGP));
-  cards.push(_chartCard('Tasa de conversión por mes', _svgLine(s.map(x=>({label:L(x.periodo), value:x.ind.conversion_mes||0})), {color:'#185FA5', suffix:'%', max:100})));
-  if(unidad==='ventas') cards.push(_chartCard('Pipeline por mes (USD)', _svgArea(s.map(x=>({label:L(x.periodo), value:(x.ind.pipeline_usd!=null?x.ind.pipeline_usd:null)})), {color:'#BA7517', fmt:_fmtC})+'<div class="help" style="font-size:11px;margin-top:2px">Solo desde el primer cierre real.</div>'));
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">'+cards.join('')+'</div>';
+  window.__EVO={};
+  const L=p=>nombreMesCorto(p), meses=s.map(x=>L(x.periodo));
+  const OBJ = unidad==='ventas' ? {cot:20,gan:2,conv:10} : {cot:30,gan:3,conv:10};
+  const cards=[];
+  cards.push(_evoChart('evo_'+unidad+'_cot',{ titulo:'Cotizaciones emitidas por mes', meses, fmtKind:'int', obj:OBJ.cot, sema:true,
+    series:[{name:'Cotizaciones', vals:s.map(x=>x.ind.cotizaciones_mes||0), color:EVO_TEAL, area:true, primary:true}] }));
+  cards.push(_evoChart('evo_'+unidad+'_gp',{ titulo:'Ganadas vs perdidas por mes', meses, fmtKind:'int', obj:OBJ.gan, sema:true,
+    series:[{name:'Ganadas', vals:s.map(x=>x.ind.ganadas_mes||0), color:EVO_TEAL, primary:true},
+            {name:'Perdidas', vals:s.map(x=>x.ind.perdidas_mes||0), color:EVO_REDL}] }));
+  cards.push(_evoChart('evo_'+unidad+'_conv',{ titulo:'Tasa de conversión por mes', meses, fmtKind:'pct', obj:OBJ.conv, sema:true, max:100,
+    series:[{name:'Conversión', vals:s.map(x=>x.ind.conversion_mes||0), color:EVO_TEAL, area:true, primary:true}] }));
+  if(unidad==='ventas'){
+    cards.push(_evoChart('evo_ventas_montocot',{ titulo:'Monto cotizado por mes (USD)', meses, fmtKind:'money',
+      series:[{name:'Cotizado', vals:s.map(x=>x.ind.monto_cotizado_usd||0), color:EVO_SLATE, area:true}] }));
+    cards.push(_evoChart('evo_ventas_pipe',{ titulo:'Pipeline por mes (USD)', meses, fmtKind:'money', nota:'Solo desde el primer cierre real.',
+      series:[{name:'Pipeline', vals:s.map(x=>x.ind.pipeline_usd!=null?x.ind.pipeline_usd:null), color:EVO_SLATE, area:true}] }));
+  }
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px">'+cards.join('')+'</div>';
 }
 /* ================= AGENDA ================= */
 // Unifica en una sola vista los vencimientos comerciales que hoy viven repartidos
@@ -5896,6 +5965,7 @@ VIEWS.cierres = function(){
       ${tablaCierres('ventas')}
     </div></div>`;
   C().innerHTML = html;
+  try{ requestAnimationFrame(_evoWire); }catch(_){ }
 };
 
 // Arranque: 1) login Microsoft, 2) cargar Supabase, 3) mostrar panel
