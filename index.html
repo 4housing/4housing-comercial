@@ -482,6 +482,7 @@ textarea.inp{resize:vertical;min-height:60px;}
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="./msal-browser.min.js"></script>
 </head>
 <body>
@@ -826,6 +827,10 @@ function quoteToRow(q){
     comercial: q.comercial || null,
     unidad_negocio: q.unidad || 'rental',
     desc_tipo: q.descTipo || 'pct', desc_valor: (q.descValor===''||q.descValor==null)?0:num(q.descValor),
+    costeo: q.costeo || null,
+    modulos: (q.modulos===''||q.modulos==null)?null:num(q.modulos),
+    tam_modulos: q.tamModulos || null,
+    m2_totales: (q.m2===''||q.m2==null)?null:num(q.m2),
     updated_at: new Date().toISOString()
   };
 }
@@ -864,6 +869,7 @@ function rowToQuote(r){
     unidad: r.unidad_negocio||'rental',
     descTipo: r.desc_tipo||'pct', descValor: (r.desc_valor!=null && r.desc_valor!==0) ? r.desc_valor : '',
     proyecto: r.proyecto||'', fechaEnvio: r.fecha_envio||'', sharepointUrl: r.sharepoint_url||'',
+    costeo: r.costeo||null, modulos:(r.modulos!=null?r.modulos:''), tamModulos:r.tam_modulos||'', m2:(r.m2_totales!=null?r.m2_totales:''),
     state: r.estado||'borrador', created: r.created_at ? Date.parse(r.created_at) : Date.now(),
     fechaEstado: r.fecha_estado ? Date.parse(r.fecha_estado) : null
   };
@@ -4541,6 +4547,17 @@ function renderEditor(isNew){
           <input type="checkbox" id="e_showtotal" ${CUR.showTotal?'checked':''} style="width:16px;height:16px;accent-color:var(--olive)"> Mostrar total (apagar = tarifario)</label>
       </div></div>
 
+      ${CUR.unidad==='ventas' ? `<div class="card"><div class="card-h"><h3>Costeo & Proyecto</h3><span class="help" style="font-size:11px">Para el pase a Compras y Planificación al ganar</span></div><div class="card-b">
+        <div class="field"><label>Costeo del proyecto (.xlsx) <span class="help" style="font-weight:400">— se lee para armar el presupuesto de Compras/Planificación</span></label>
+          <input type="file" id="e_costeo_file" accept=".xlsx,.xls" onchange="cstCargarCosteo(this)"></div>
+        <div id="costeoResumen" style="font-size:12.5px;color:#6f6c60;margin:-4px 0 8px">${cstResumenHtml(CUR.costeo)}</div>
+        <div class="frow c2">
+          <div class="field"><label>Cantidad de módulos</label><input id="e_modulos" type="number" value="${esc(String(CUR.modulos??''))}" placeholder="ej. 6"></div>
+          <div class="field"><label>Tamaño / tipología de módulos</label><input id="e_tammod" value="${esc(CUR.tamModulos||'')}" placeholder="ej. 6 x 2,6 m"></div>
+        </div>
+        <div class="field"><label>m² totales</label><input id="e_m2" type="number" value="${esc(String(CUR.m2??''))}" placeholder="ej. 180"></div>
+      </div></div>` : ''}
+
       ${panelOrigen}
 
       <div class="card"><div class="card-h"><h3>Ítems</h3><button class="btn sm" onclick="addItem()">${ICO.plus} Ítem</button></div>
@@ -4586,6 +4603,7 @@ function renderEditor(isNew){
   bind('e_clientname','client'); bind('e_attn','attn'); bind('e_phone','phone'); bind('e_email','email');
   bind('e_date','dateISO'); bind('e_state','state'); bind('e_comercial','comercial');
   bind('e_proyecto','proyecto');
+  if(document.getElementById('e_modulos')){ bind('e_modulos','modulos'); bind('e_tammod','tamModulos'); bind('e_m2','m2'); }
   bind('e_pago','pago'); bind('e_validez','validez'); bind('e_entrega','entrega'); bind('e_showentrega','showEntrega');
   if(document.getElementById('e_minimo')){ bind('e_minimo','minimo'); bind('e_showminimo','showMinimo'); }
   bind('e_desctipo','descTipo'); bind('e_descvalor','descValor');
@@ -4834,6 +4852,100 @@ function fitPreview(){
   const page=scale.querySelector('.page');
   if(page) scale.style.height=(page.offsetHeight*s)+'px';
 }
+
+/* ===== Costeo: parseo para el cableado a Compras/Planificación (solo ventas) =====
+   Lee el Excel del costeo (pestaña "Tablero Compras" = secciones + pestaña de
+   detalle = sub-rubros para el desglose) y guarda el presupuesto ESTRUCTURADO en
+   la cotización, para que al ganar pase redondo a Compras (y el MOD a Planificación)
+   sin re-parsear ningún Excel. Mismo criterio que la app de Compras. */
+function cstNorm(s){ return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim(); }
+function cstNum(v){ if(typeof v==='number') return v; if(v==null) return 0; const n=parseFloat(String(v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; }
+function cstNumNear(row,c){ for(let k=1;k<=3;k++){ const v=row[c+k]; if(v!==''&&v!=null){ const n=cstNum(v); if(!isNaN(n)) return n; } } return null; }
+function cstAmbitoGuess(etq){ const n=cstNorm(etq); if(/MONTAJE|MANO DE OBRA DIRECTA|\bM\.?O\.?D\.?\b/.test(n)) return 'mod'; if(/INFRAESTRUCTURA|TASA|SEGURIDAD|HIGIENE|MUNICIPAL|SEGURO/.test(n)) return 'externo'; return 'compras'; }
+function cstReadWb(file){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=e=>{ try{ res(XLSX.read(new Uint8Array(e.target.result),{type:'array'})); }catch(err){ rej(new Error('No pude leer '+file.name+': '+(err.message||err))); } }; fr.onerror=()=>rej(new Error('No se pudo abrir '+file.name)); fr.readAsArrayBuffer(file); }); }
+function cstParseDetalle(wb, nombres, tableroSheet){
+  try{
+    const secN=new Set((nombres||[]).map(cstNorm)); const byNorm={}; (nombres||[]).forEach(s=>{ byNorm[cstNorm(s)]=s; });
+    let best=null, bestN=0;
+    for(const name of wb.SheetNames){
+      if(name===tableroSheet) continue;
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:true,defval:null});
+      let cnt=0; for(const r of rows){ if(r && r[1]!=null && secN.has(cstNorm(r[1]))) cnt++; }
+      if(cnt>bestN){ bestN=cnt; best={rows}; }
+    }
+    if(!best || bestN<3) return {};
+    const rows=best.rows, map={}; const num=v=>(typeof v==='number'?v:cstNum(v));
+    for(let i=0;i<rows.length;i++){
+      const r=rows[i]||[]; const nm=r[1];
+      if(nm==null || String(nm).trim()==='') continue;
+      if(!secN.has(cstNorm(nm))) continue;
+      if(!(r[2]==null && r[4]==null && r[7]==null)) continue;
+      const seccion=byNorm[cstNorm(nm)]; const comps=[];
+      for(let j=i+1;j<rows.length;j++){
+        const rr=rows[j]||[]; const b=rr[1]; const bs=(b==null?'':String(b).trim());
+        const esComp=(rr[2]!=null||rr[4]!=null||rr[7]!=null);
+        if(!esComp){ if(bs==='') continue; if(secN.has(cstNorm(bs))) break; if(/^(SUB\s?TOTAL|TOTAL)/i.test(bs)) break; break; }
+        const ars=num(rr[9])||0, usd=num(rr[8])||0;
+        if(ars>0) comps.push({etq:bs, ars, usd, ambito:cstAmbitoGuess(bs)});
+      }
+      if(comps.length>=2) map[seccion]=comps;
+    }
+    return map;
+  }catch(e){ return {}; }
+}
+async function cstParseCosteo(file){
+  const wb=await cstReadWb(file);
+  let found=null;
+  for(const name of wb.SheetNames){
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:false,defval:''});
+    for(let i=0;i<Math.min(rows.length,80);i++){
+      const h=(rows[i]||[]).map(cstNorm);
+      const cSec=h.indexOf('SECCION'); const cArs=h.findIndex(x=>x==='PRESUPUESTO ($)'); const cUsd=h.findIndex(x=>x==='PRESUPUESTO (US$)');
+      if(cSec>=0 && cArs>=0){ found={rows, hdr:i, cSec, cArs, cUsd, sheetName:name}; break; }
+    }
+    if(found) break;
+  }
+  if(!found) throw new Error('No encontré la tabla “AVANCE POR SECCIÓN” (columnas “Sección” y “Presupuesto ($)”). ¿Es el Excel del costeo con la pestaña “Tablero Compras”?');
+  const {rows,hdr,cSec,cArs,cUsd}=found; const secciones=[];
+  for(let r=hdr+1;r<rows.length;r++){
+    const row=rows[r]||[]; const sec=String(row[cSec]==null?'':row[cSec]).trim();
+    if(!sec){ if(secciones.length) break; else continue; }
+    if(cstNorm(sec).indexOf('TOTAL')>=0) break;
+    secciones.push({ seccion:sec, orden:secciones.length, presupuesto_ars:cstNum(row[cArs])||0, presupuesto_usd:cUsd>=0?(cstNum(row[cUsd])||0):0 });
+  }
+  if(!secciones.length) throw new Error('Encontré la tabla pero sin filas de sección.');
+  let tc=null, meta=null, tol=null;
+  for(const name of wb.SheetNames){
+    const rr=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:false,defval:''});
+    for(const row of rr){
+      for(let c=0;c<row.length;c++){
+        const cell=cstNorm(row[c]);
+        if(tc==null){ const m=cell.match(/\bTC\s*([0-9][0-9.]*)/); if(m){ const v=cstNum(m[1]); if(v>0) tc=v; } }
+        if(meta==null && cell.indexOf('META DE AHORRO')>=0){ const v=cstNumNear(row,c); if(v!=null) meta=v; }
+        if(tol==null && cell.indexOf('TOLERANCIA DE DESVIO')>=0){ const v=cstNumNear(row,c); if(v!=null) tol=v; }
+      }
+    }
+  }
+  const detalle=cstParseDetalle(wb, secciones.map(s=>s.seccion), found.sheetName);
+  return {secciones, tc, meta, tol, detalle, archivo_nombre:file.name, cargado_en:new Date().toISOString()};
+}
+function cstResumenHtml(c){
+  if(!c || !c.secciones || !c.secciones.length) return 'Sin costeo cargado todavía.';
+  const tot=c.secciones.reduce((a,s)=>a+(+s.presupuesto_ars||0),0);
+  return '✓ Costeo: '+esc(c.archivo_nombre||'')+' · TC '+(c.tc?Math.round(c.tc):'—')+' · '+c.secciones.length+' secciones · total $'+tot.toLocaleString('es-AR');
+}
+async function cstCargarCosteo(inp){
+  const f=(inp && inp.files||[])[0]; if(!f) return;
+  const msg=document.getElementById('costeoResumen'); if(msg){ msg.style.color='#6f6c60'; msg.textContent='Leyendo…'; }
+  try{
+    const parsed=await cstParseCosteo(f);
+    CUR.costeo=parsed;
+    if(CUR.id){ await SB.updateQuote(CUR.id, {costeo:parsed}); }   // persiste ya si la OE existe
+    if(msg) msg.innerHTML=cstResumenHtml(parsed);
+    toast('Costeo cargado: '+parsed.secciones.length+' secciones');
+  }catch(e){ if(msg){ msg.style.color='#b3261e'; msg.textContent='Error: '+(e.message||e); } toast('No se pudo leer el costeo'); }
+}
+window.cstCargarCosteo=cstCargarCosteo;
 
 /* ---- save / print ---- */
 async function saveQuote(opts){
