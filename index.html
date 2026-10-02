@@ -665,6 +665,9 @@ const SB_REST = SB_URL + '/rest/v1';
 // URL del Teams Workflow ("Enviar alertas de webhook a un canal") del canal Cobranzas.
 // URL firmada (incluye &sig=), acepta POST anónimo: no da 401 ni problemas de CORS.
 const COBRANZA_WEBHOOK_URL = 'https://defaultc408b6d8ae0b4d309056da52e18116.c4.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/24fd3ce35ac74903b076d91978e3f43f/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=YtVz7Ul9A1XqOe_zHDpIPFOcbvldHsn85BK9PgDjIw0';
+// Webhook del canal de Teams "Proyectos ganados" (lo ven Compras y Planificación).
+// Vacío = no se envía el aviso (igual que COBRANZA si no hay URL). Pegar la URL firmada del Workflow cuando exista.
+const PROYECTO_WEBHOOK_URL = '';
 
 // Cliente oficial de Supabase, solo para autenticación / sesión (login con Azure)
 const sbClient = window.supabase.createClient(SB_URL, SB_KEY);
@@ -1666,6 +1669,7 @@ function refBase(x){
 async function setQuoteState(id, state){
   const q = DB.quotes.find(x=>x.id===id);
   if(!q) return;
+  const _old = q.state;   // para avisar solo en la transición a ganada
   if(state==='ganada'){ const _falta=cstFaltaParaGanar(q); if(_falta.length){ toast('Para marcar GANADA falta: '+_falta.join(' y ')+'. Abrí la OE y completalo.'); return; } }
   try{
     const patch = {estado:state, updated_at:new Date().toISOString()};
@@ -1676,7 +1680,7 @@ async function setQuoteState(id, state){
     if(patch.fecha_envio) q.fechaEnvio = patch.fecha_envio;
     q.state = state;
     toast('Estado actualizado: '+stLabel(state));
-    if(state==='ganada'){ await reloadDB(); await crearCobranzaDesdeQuote(id); }
+    if(state==='ganada'){ await reloadDB(); await crearCobranzaDesdeQuote(id); if(q.unidad==='ventas' && _old!=='ganada') notificarProyectoGanado(q); }
     VIEWS.quotes();
   }catch(e){ toast('Error: '+e.message); }
 }
@@ -2680,6 +2684,29 @@ async function crearCobranzaDesdeQuote(quoteId){
   }catch(e){ console.warn('Cobranza (quote):', e.message); }
 }
 // y mail (vía Edge Function notificar-cobranza). Silencioso: nunca interrumpe el flujo de la app.
+// Aviso a Compras + Planificación cuando se gana un proyecto de VENTAS (Teams).
+// Silencioso: nunca interrumpe el flujo. Vacío el webhook = no hace nada.
+async function notificarProyectoGanado(q){
+  try{
+    if(!q || q.unidad!=='ventas' || !PROYECTO_WEBHOOK_URL) return;
+    const tot = (q.costeo && q.costeo.secciones) ? q.costeo.secciones.reduce((a,s)=>a+(+s.presupuesto_ars||0),0) : 0;
+    const facts = [
+      {title:'OE:', value: q.ref||'—'},
+      {title:'Proyecto:', value: (q.proyecto||q.title||'—')},
+      {title:'Cliente:', value: q.client||'—'}
+    ];
+    if(q.modulos) facts.push({title:'Módulos:', value: String(q.modulos)});
+    if(tot)       facts.push({title:'Costeo total:', value: '$ '+Number(tot).toLocaleString('es-AR')});
+    if(q.comercial) facts.push({title:'Comercial:', value: q.comercial});
+    const card = { type:'message', attachments:[{ contentType:'application/vnd.microsoft.card.adaptive', content:{
+      $schema:'http://adaptivecards.io/schemas/adaptive-card.json', type:'AdaptiveCard', version:'1.4',
+      body:[ {type:'TextBlock', size:'Medium', weight:'Bolder', text:'🏗️ Nuevo proyecto ganado — cargado en Compras y Planificación', wrap:true},
+             {type:'FactSet', facts: facts} ] }}]};
+    const r = await fetch(PROYECTO_WEBHOOK_URL, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(card)});
+    if(!(r.ok || r.status===202)) console.warn('Aviso proyecto: Teams respondió', r.status);
+  }catch(e){ console.warn('Aviso proyecto no enviado:', e.message); }
+}
+
 async function notificarCobranza(payload){
   const sym = (payload.moneda==='ARS') ? '$' : 'USD';
   let okTeams = false, okMail = false;
@@ -5000,6 +5027,7 @@ async function saveQuote(opts){
     // "Pelota redonda": una OE de ventas no se puede ganar sin costeo + módulos.
     const _willGanada = (opts.state==='ganada') || (!opts.state && CUR.state==='ganada');
     if(_willGanada){ const _falta=cstFaltaParaGanar(CUR); if(_falta.length){ toast('Para marcar GANADA falta cargar: '+_falta.join(' y ')+'.'); return; } }
+    const _eraGanada = !!(CUR.id && (DB.quotes.find(x=>x.id===CUR.id)||{}).state==='ganada');   // para avisar solo en la transición
     CUR.client = document.getElementById('e_clientname') ? val('e_clientname').trim() : CUR.client;
     // Rental: el nombre del cliente se guarda SIEMPRE en mayúscula
     if(CUR.client) CUR.client = upperName(CUR.client);
@@ -5049,7 +5077,7 @@ async function saveQuote(opts){
       await SB.updateQuote(CUR.id, quoteToRow(CUR));
       await reloadDB();
     }
-    if(CUR.state==='ganada' && CUR.id){ await reloadDB(); await crearCobranzaDesdeQuote(CUR.id); }
+    if(CUR.state==='ganada' && CUR.id){ await reloadDB(); await crearCobranzaDesdeQuote(CUR.id); if(CUR.unidad==='ventas' && !_eraGanada) notificarProyectoGanado(CUR); }
     if(!opts.silent){ toast('Cotización guardada'); go(CUR.unidad==='ventas' ? 'ventas' : 'quotes'); }
   }catch(e){ toast('Error al guardar: '+e.message); throw e; }
 }
