@@ -1666,6 +1666,7 @@ function refBase(x){
 async function setQuoteState(id, state){
   const q = DB.quotes.find(x=>x.id===id);
   if(!q) return;
+  if(state==='ganada'){ const _falta=cstFaltaParaGanar(q); if(_falta.length){ toast('Para marcar GANADA falta: '+_falta.join(' y ')+'. Abrí la OE y completalo.'); return; } }
   try{
     const patch = {estado:state, updated_at:new Date().toISOString()};
     // Fecha de envío: se actualiza a AHORA cada vez que se pasa a "Cotizado-Enviado"
@@ -4937,6 +4938,15 @@ function cstResumenHtml(c){
   const tot=c.secciones.reduce((a,s)=>a+(+s.presupuesto_ars||0),0);
   return '✓ Costeo: '+esc(c.archivo_nombre||'')+' · TC '+(c.tc?Math.round(c.tc):'—')+' · '+c.secciones.length+' secciones · total $'+tot.toLocaleString('es-AR');
 }
+// Para ganar una OE de ventas: hace falta el costeo y la cantidad de módulos
+// (lo que Compras/Planificación necesitan para que "la pelota pase redonda").
+function cstFaltaParaGanar(q){
+  if(!q || q.unidad!=='ventas') return [];
+  const f=[];
+  if(!(q.costeo && q.costeo.secciones && q.costeo.secciones.length)) f.push('el costeo');
+  if(!(Number(q.modulos)>0)) f.push('la cantidad de módulos');
+  return f;
+}
 async function cstCargarCosteo(inp){
   const f=(inp && inp.files||[])[0]; if(!f) return;
   const msg=document.getElementById('costeoResumen'); if(msg){ msg.style.color='#6f6c60'; msg.textContent='Leyendo…'; }
@@ -4987,6 +4997,9 @@ window.cstUsarCosteoSP=cstUsarCosteoSP;
 async function saveQuote(opts){
   opts = opts || {};
   try{
+    // "Pelota redonda": una OE de ventas no se puede ganar sin costeo + módulos.
+    const _willGanada = (opts.state==='ganada') || (!opts.state && CUR.state==='ganada');
+    if(_willGanada){ const _falta=cstFaltaParaGanar(CUR); if(_falta.length){ toast('Para marcar GANADA falta cargar: '+_falta.join(' y ')+'.'); return; } }
     CUR.client = document.getElementById('e_clientname') ? val('e_clientname').trim() : CUR.client;
     // Rental: el nombre del cliente se guarda SIEMPRE en mayúscula
     if(CUR.client) CUR.client = upperName(CUR.client);
