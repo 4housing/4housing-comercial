@@ -4549,7 +4549,10 @@ function renderEditor(isNew){
 
       ${CUR.unidad==='ventas' ? `<div class="card"><div class="card-h"><h3>Costeo & Proyecto</h3><span class="help" style="font-size:11px">Para el pase a Compras y Planificación al ganar</span></div><div class="card-b">
         <div class="field"><label>Costeo del proyecto (.xlsx) <span class="help" style="font-weight:400">— se lee para armar el presupuesto de Compras/Planificación</span></label>
-          <input type="file" id="e_costeo_file" accept=".xlsx,.xls" onchange="cstCargarCosteo(this)"></div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input type="file" id="e_costeo_file" accept=".xlsx,.xls" onchange="cstCargarCosteo(this)" style="flex:1;min-width:180px">
+            ${CUR.id ? `<button type="button" class="btn ghost sm" onclick="cstElegirCosteoSP()" title="Tomar el costeo de la carpeta 04 COSTEO - PRESUPUESTO de esta OE en SharePoint">🗂️ Elegir de SharePoint</button>` : ''}
+          </div></div>
         <div id="costeoResumen" style="font-size:12.5px;color:#6f6c60;margin:-4px 0 8px">${cstResumenHtml(CUR.costeo)}</div>
         <div class="frow c2">
           <div class="field"><label>Cantidad de módulos</label><input id="e_modulos" type="number" value="${esc(String(CUR.modulos??''))}" placeholder="ej. 6"></div>
@@ -4893,8 +4896,8 @@ function cstParseDetalle(wb, nombres, tableroSheet){
     return map;
   }catch(e){ return {}; }
 }
-async function cstParseCosteo(file){
-  const wb=await cstReadWb(file);
+async function cstParseCosteo(file){ const wb=await cstReadWb(file); return cstParseWb(wb, file.name); }
+function cstParseWb(wb, nombre){
   let found=null;
   for(const name of wb.SheetNames){
     const rows=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:false,defval:''});
@@ -4927,7 +4930,7 @@ async function cstParseCosteo(file){
     }
   }
   const detalle=cstParseDetalle(wb, secciones.map(s=>s.seccion), found.sheetName);
-  return {secciones, tc, meta, tol, detalle, archivo_nombre:file.name, cargado_en:new Date().toISOString()};
+  return {secciones, tc, meta, tol, detalle, archivo_nombre:nombre||'', cargado_en:new Date().toISOString()};
 }
 function cstResumenHtml(c){
   if(!c || !c.secciones || !c.secciones.length) return 'Sin costeo cargado todavía.';
@@ -4946,6 +4949,39 @@ async function cstCargarCosteo(inp){
   }catch(e){ if(msg){ msg.style.color='#b3261e'; msg.textContent='Error: '+(e.message||e); } toast('No se pudo leer el costeo'); }
 }
 window.cstCargarCosteo=cstCargarCosteo;
+
+/* ---- Elegir el costeo directo de la carpeta "04 COSTEO - PRESUPUESTO" de la OE en SharePoint ---- */
+let cstSpFiles=null;
+async function cstElegirCosteoSP(){
+  if(typeof CUR==='undefined' || !CUR || CUR.unidad!=='ventas' || !CUR.id){ toast('Guardá la OE primero.'); return; }
+  openModal('Costeo desde SharePoint','<div id="cstSpBody">'+_spMsgBrowse('Conectando con SharePoint…')+'</div>','<button class="btn ghost" onclick="closeModal()">Cerrar</button>');
+  const body=()=>document.getElementById('cstSpBody');
+  try{
+    const proj=await _spProyectoItem(CUR);
+    const sub=await _spSubcarpeta(proj.id, '04 COSTEO - PRESUPUESTO');   // crea-si-no-existe (normalmente ya existe)
+    const kids=await _spChildren(sub.id);
+    cstSpFiles=kids.filter(x=>x.file && /\.xlsx?$/i.test(x.name||''));
+    if(!cstSpFiles.length){ if(body()) body().innerHTML='<div style="font-size:13px;padding:8px 2px">No hay archivos .xlsx en <b>04 COSTEO - PRESUPUESTO</b> de esta OE. Subí el costeo ahí (o usá “Cargar archivo”).</div>'; return; }
+    if(body()) body().innerHTML='<div style="font-size:12.5px;color:#6f6c60;margin-bottom:8px">Elegí el costeo (que coincida con la versión de esta OE):</div>'
+      +cstSpFiles.map((f,i)=>'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 6px;border-bottom:1px solid var(--line)"><div style="font-size:13px;min-width:0"><b>'+esc(f.name)+'</b> <span class="help" style="font-size:11px">'+_spSize(f.size)+'</span></div><button class="btn sm" onclick="cstUsarCosteoSP('+i+')">Usar</button></div>').join('');
+  }catch(e){ if(body()) body().innerHTML='<div style="color:#b4554e;font-size:13px;padding:8px 2px">'+esc(e.message||e)+'</div>'; }
+}
+window.cstElegirCosteoSP=cstElegirCosteoSP;
+async function cstUsarCosteoSP(i){
+  const f=(cstSpFiles||[])[i]; if(!f) return;
+  const body=document.getElementById('cstSpBody'); if(body) body.innerHTML=_spMsgBrowse('Descargando y leyendo '+esc(f.name)+'…');
+  try{
+    const r=await _spFetch('/drives/'+_spDrive+'/items/'+f.id+'/content');
+    if(!r.ok) throw new Error('No se pudo descargar el archivo ('+r.status+').');
+    const buf=await r.arrayBuffer();
+    const parsed=cstParseWb(XLSX.read(new Uint8Array(buf),{type:'array'}), f.name);
+    CUR.costeo=parsed;
+    if(CUR.id){ await SB.updateQuote(CUR.id, {costeo:parsed}); }
+    const res=document.getElementById('costeoResumen'); if(res) res.innerHTML=cstResumenHtml(parsed);
+    closeModal(); toast('Costeo cargado desde SharePoint: '+parsed.secciones.length+' secciones');
+  }catch(e){ if(body) body.innerHTML='<div style="color:#b4554e;font-size:13px;padding:8px 2px">'+esc(e.message||e)+'</div>'; }
+}
+window.cstUsarCosteoSP=cstUsarCosteoSP;
 
 /* ---- save / print ---- */
 async function saveQuote(opts){
