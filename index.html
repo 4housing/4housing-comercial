@@ -665,9 +665,10 @@ const SB_REST = SB_URL + '/rest/v1';
 // URL del Teams Workflow ("Enviar alertas de webhook a un canal") del canal Cobranzas.
 // URL firmada (incluye &sig=), acepta POST anónimo: no da 401 ni problemas de CORS.
 const COBRANZA_WEBHOOK_URL = 'https://defaultc408b6d8ae0b4d309056da52e18116.c4.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/24fd3ce35ac74903b076d91978e3f43f/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=YtVz7Ul9A1XqOe_zHDpIPFOcbvldHsn85BK9PgDjIw0';
-// Webhook del canal de Teams "Proyectos ganados" (lo ven Compras y Planificación).
-// Vacío = no se envía el aviso (igual que COBRANZA si no hay URL). Pegar la URL firmada del Workflow cuando exista.
-const PROYECTO_WEBHOOK_URL = '';
+// Webhooks de Teams (Workflow "Enviar alertas de webhook a un canal"), uno por sector.
+// Al ganar un proyecto de ventas se postea la tarjeta en ambos canales. Vacío = no envía.
+const PROYECTO_WEBHOOK_COMPRAS = 'https://defaultc408b6d8ae0b4d309056da52e18116.c4.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/12/workflows/0b3186fa2d4646b28511363d9c37268c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=kA1RapaRv0cMHBWebxt3-AdjtH1ZrE7CxCFAdYLtVeU';
+const PROYECTO_WEBHOOK_PLANIF  = 'https://defaultc408b6d8ae0b4d309056da52e18116.c4.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/24/workflows/759990cba1384eb8940b395721aff47c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=AJCgoILWkOQD7H63n2cOmhS5VR43Fb-tANv8WnWBwFE';
 
 // Cliente oficial de Supabase, solo para autenticación / sesión (login con Azure)
 const sbClient = window.supabase.createClient(SB_URL, SB_KEY);
@@ -2688,7 +2689,9 @@ async function crearCobranzaDesdeQuote(quoteId){
 // Silencioso: nunca interrumpe el flujo. Vacío el webhook = no hace nada.
 async function notificarProyectoGanado(q){
   try{
-    if(!q || q.unidad!=='ventas' || !PROYECTO_WEBHOOK_URL) return;
+    if(!q || q.unidad!=='ventas') return;
+    const urls=[PROYECTO_WEBHOOK_COMPRAS, PROYECTO_WEBHOOK_PLANIF].filter(Boolean);
+    if(!urls.length) return;
     const tot = (q.costeo && q.costeo.secciones) ? q.costeo.secciones.reduce((a,s)=>a+(+s.presupuesto_ars||0),0) : 0;
     const facts = [
       {title:'OE:', value: q.ref||'—'},
@@ -2702,8 +2705,12 @@ async function notificarProyectoGanado(q){
       $schema:'http://adaptivecards.io/schemas/adaptive-card.json', type:'AdaptiveCard', version:'1.4',
       body:[ {type:'TextBlock', size:'Medium', weight:'Bolder', text:'🏗️ Nuevo proyecto ganado — cargado en Compras y Planificación', wrap:true},
              {type:'FactSet', facts: facts} ] }}]};
-    const r = await fetch(PROYECTO_WEBHOOK_URL, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(card)});
-    if(!(r.ok || r.status===202)) console.warn('Aviso proyecto: Teams respondió', r.status);
+    const body = JSON.stringify(card);
+    await Promise.all(urls.map(u =>
+      fetch(u, {method:'POST', headers:{'Content-Type':'application/json'}, body})
+        .then(r=>{ if(!(r.ok || r.status===202)) console.warn('Aviso proyecto: Teams respondió', r.status); })
+        .catch(e=> console.warn('Aviso proyecto no enviado:', e.message))
+    ));
   }catch(e){ console.warn('Aviso proyecto no enviado:', e.message); }
 }
 
