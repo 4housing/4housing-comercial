@@ -4924,7 +4924,8 @@ function cstParseDetalle(wb, nombres, tableroSheet){
         const esComp=(rr[2]!=null||rr[4]!=null||rr[7]!=null);
         if(!esComp){ if(bs==='') continue; if(secN.has(cstNorm(bs))) break; if(/^(SUB\s?TOTAL|TOTAL)/i.test(bs)) break; break; }
         const ars=num(rr[9])||0, usd=num(rr[8])||0;
-        if(ars>0) comps.push({etq:bs, ars, usd, ambito:cstAmbitoGuess(bs)});
+        const cant=num(rr[7])||1, mo=(num(rr[3])||0)*cant, material=(num(rr[5])||0)*cant;   // M.O.$ y Material$ son por unidad
+        if(ars>0) comps.push({etq:bs, ars, usd, mo, material, ambito:cstAmbitoGuess(bs)});
       }
       if(comps.length>=2) map[seccion]=comps;
     }
