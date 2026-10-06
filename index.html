@@ -4583,9 +4583,9 @@ function renderEditor(isNew){
       </div></div>
 
       ${CUR.unidad==='ventas' ? `<div class="card"><div class="card-h"><h3>Costeo & Proyecto</h3><span class="help" style="font-size:11px">Para el pase a Compras y Planificación al ganar</span></div><div class="card-b">
-        <div class="field"><label>Costeo del proyecto (.xlsx) <span class="help" style="font-weight:400">— se lee para armar el presupuesto de Compras/Planificación</span></label>
+        <div class="field"><label>Costeo del proyecto (.xlsx / .xlsm) <span class="help" style="font-weight:400">— se lee para armar el presupuesto de Compras/Planificación</span></label>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <input type="file" id="e_costeo_file" accept=".xlsx,.xls" onchange="cstCargarCosteo(this)" style="flex:1;min-width:180px">
+            <input type="file" id="e_costeo_file" accept=".xlsx,.xlsm,.xls" onchange="cstCargarCosteo(this)" style="flex:1;min-width:180px">
             ${CUR.id ? `<button type="button" class="btn ghost sm" onclick="cstElegirCosteoSP()" title="Tomar el costeo de la carpeta 04 COSTEO - PRESUPUESTO de esta OE en SharePoint">🗂️ Elegir de SharePoint</button>` : ''}
           </div></div>
         <div id="costeoResumen" style="font-size:12.5px;color:#6f6c60;margin:-4px 0 8px">${cstResumenHtml(CUR.costeo)}</div>
@@ -5005,8 +5005,8 @@ async function cstElegirCosteoSP(){
     const proj=await _spProyectoItem(CUR);
     const sub=await _spSubcarpeta(proj.id, '04 COSTEO - PRESUPUESTO');   // crea-si-no-existe (normalmente ya existe)
     const kids=await _spChildren(sub.id);
-    cstSpFiles=kids.filter(x=>x.file && /\.xlsx?$/i.test(x.name||''));
-    if(!cstSpFiles.length){ if(body()) body().innerHTML='<div style="font-size:13px;padding:8px 2px">No hay archivos .xlsx en <b>04 COSTEO - PRESUPUESTO</b> de esta OE. Subí el costeo ahí (o usá “Cargar archivo”).</div>'; return; }
+    cstSpFiles=kids.filter(x=>x.file && /\.xls[mx]?$/i.test(x.name||''));
+    if(!cstSpFiles.length){ if(body()) body().innerHTML='<div style="font-size:13px;padding:8px 2px">No hay archivos .xlsx/.xlsm en <b>04 COSTEO - PRESUPUESTO</b> de esta OE. Subí el costeo ahí (o usá “Cargar archivo”).</div>'; return; }
     if(body()) body().innerHTML='<div style="font-size:12.5px;color:#6f6c60;margin-bottom:8px">Elegí el costeo (que coincida con la versión de esta OE):</div>'
       +cstSpFiles.map((f,i)=>'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 6px;border-bottom:1px solid var(--line)"><div style="font-size:13px;min-width:0"><b>'+esc(f.name)+'</b> <span class="help" style="font-size:11px">'+_spSize(f.size)+'</span></div><button class="btn sm" onclick="cstUsarCosteoSP('+i+')">Usar</button></div>').join('');
   }catch(e){ if(body()) body().innerHTML='<div style="color:#b4554e;font-size:13px;padding:8px 2px">'+esc(e.message||e)+'</div>'; }
