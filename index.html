@@ -4527,6 +4527,39 @@ async function delQuote(id){
   }catch(e){ toast('Error al eliminar: '+e.message); }
 }
 window.delQuote = delQuote;
+
+// Reclasificar una OE entre Rental y Ventas (corrige una carga equivocada). Afecta
+// TODAS las versiones de la oferta: reasigna un número nuevo del contador de la
+// unidad destino y regenera la ref (OE-R/V-…). Bloqueado si alguna versión está
+// ganada (ya disparó cobranza/proyecto; habría que revertir el estado primero).
+async function reclasificarUnidad(){
+  if(!CUR || !CUR.id){ toast('Guardá la cotización primero.'); return; }
+  const actual = (CUR.unidad==='ventas') ? 'ventas' : 'rental';
+  const target = (actual==='ventas') ? 'rental' : 'ventas';
+  const targetLbl = (target==='ventas') ? 'Ventas' : 'Rental';
+  // Familia = todas las versiones de esta OE: mismo seq y misma unidad actual
+  // (los rangos de seq de rental y ventas no se solapan, pero filtramos por unidad igual).
+  const fam = DB.quotes.filter(x => x.seq===CUR.seq && (x.unidad||'rental')===actual);
+  if(!fam.length){ toast('No encontré la oferta para reclasificar.'); return; }
+  const ganadas = fam.filter(x => x.state==='ganada');
+  if(ganadas.length){
+    alert('No se puede reclasificar '+refBase(CUR)+': tiene versión(es) GANADA(S) ('+ganadas.map(x=>x.ref).join(', ')+') que ya generaron cobranza/proyecto. Revertí el estado de esa(s) versión(es) y volvé a intentar.');
+    return;
+  }
+  if(!confirm('Vas a reclasificar '+refBase(CUR)+' y sus '+fam.length+' versión(es) de '+(actual==='ventas'?'Ventas':'Rental')+' a '+targetLbl+'.\n\nSe le asigna un número NUEVO de '+targetLbl+' — la referencia va a cambiar. ¿Confirmás?')) return;
+  try{
+    const newSeq = await SB.nextSeq(target);   // número correlativo propio de la unidad destino
+    for(const v of fam){
+      const ver = v.version || parseVer(v.ref) || 1;
+      await SB.updateQuote(v.id, { seq:newSeq, ref:refStr(newSeq, ver, target), unidad_negocio:target });
+    }
+    await reloadDB();
+    const upd = DB.quotes.find(x=>x.id===CUR.id);
+    toast('Reclasificada a '+targetLbl+(upd?': '+upd.ref:''));
+    editQuote(CUR.id);   // recarga el editor con la ref/unidad nuevas
+  }catch(e){ toast('Error al reclasificar: '+e.message); }
+}
+window.reclasificarUnidad = reclasificarUnidad;
 function renderEditor(isNew){
   const volverView = (CUR.unidad==='ventas') ? 'ventas' : 'quotes';
   setHeader(isNew?'Nueva cotización':'Editar cotización', CUR.ref,
@@ -4571,6 +4604,13 @@ function renderEditor(isNew){
         <div class="frow c2">
           <div class="field"><label>Referencia (automática)</label><input id="e_ref" value="${esc(CUR.ref)}" readonly disabled title="El número se asigna automáticamente y no puede modificarse" style="background:#f1efe6;color:#6f6c60;cursor:not-allowed"></div>
           <div class="field"><label>Fecha</label><input id="e_date" type="date" value="${esc(CUR.dateISO)}"></div>
+        </div>
+        <div class="field"><label>Unidad de negocio</label>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-weight:700;color:#54514a">${CUR.unidad==='ventas'?'Ventas':'Rental'}</span>
+            ${CUR.id?`<button type="button" class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="reclasificarUnidad()">Reclasificar a ${CUR.unidad==='ventas'?'Rental':'Ventas'}</button>`:''}
+          </div>
+          <div class="help" style="font-size:11px;margin-top:3px">Reasigna el número (la ref pasa a OE-${CUR.unidad==='ventas'?'R':'V'}-…) para todas las versiones. No se puede si hay una versión ganada.</div>
         </div>
         <div class="field"><label>Proyecto <span class="help" style="font-weight:400">(referencia libre)</span></label><input id="e_proyecto" value="${esc(CUR.proyecto||'')}" placeholder="Ej.: SACDE Cutral Có · Campamento"></div>
         <div class="frow c2">
