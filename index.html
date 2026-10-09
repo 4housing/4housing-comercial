@@ -4542,6 +4542,45 @@ function editQuote(id){
   if(!CUR.unidad) CUR.unidad = 'rental'; // compat. cotizaciones previas
   renderEditor(false);
 }
+
+/* ===== Link directo a una cotización (deep-link) =====
+   Permite abrir una cotización puntual desde afuera (p.ej. el artifact de seguimiento):
+   https://.../4housing-comercial/?oe=OE-V-4437-01   (o ?id=<uuid>)
+   El target se guarda en sessionStorage ANTES del login, para que sobreviva el redirect
+   de OAuth (que vuelve a la URL base sin la query). */
+function _deepQuoteTarget(){
+  try{
+    const sp = new URLSearchParams(location.search);
+    let oe = sp.get('oe')||sp.get('ref'); let id = sp.get('id')||sp.get('quote');
+    if(!oe && !id && location.hash){
+      const hp = new URLSearchParams(location.hash.replace(/^#/,''));
+      oe = hp.get('oe')||hp.get('ref'); id = hp.get('id')||hp.get('quote');
+    }
+    if(oe||id) return { oe:oe||null, id:id||null };
+  }catch(_){}
+  return null;
+}
+function _stashDeepQuote(){ try{ const t=_deepQuoteTarget(); if(t) sessionStorage.setItem('deepQuote', JSON.stringify(t)); }catch(_){} }
+// Devuelve la cotización pedida por el link (y limpia el stash), o null.
+function _resolveDeepQuote(){
+  let t=_deepQuoteTarget();
+  if(!t){ try{ const s=sessionStorage.getItem('deepQuote'); if(s) t=JSON.parse(s); }catch(_){} }
+  if(!t) return null;
+  try{ sessionStorage.removeItem('deepQuote'); }catch(_){}
+  const q = t.id ? DB.quotes.find(x=>String(x.id)===String(t.id))
+                 : DB.quotes.find(x=>String(x.ref||'').toLowerCase()===String(t.oe||'').toLowerCase());
+  if(!q){ toast('No encontré la cotización '+esc(t.oe||t.id||'')+'.'); return null; }
+  try{ history.replaceState(null,'',location.pathname); }catch(_){}   // limpia la URL
+  return q;
+}
+// Copia al portapapeles el link directo a la cotización abierta.
+function copiarLinkCotizacion(){
+  if(!CUR || !CUR.ref){ toast('Guardá la cotización primero.'); return; }
+  const url = location.origin + location.pathname + '?oe=' + encodeURIComponent(CUR.ref);
+  try{ navigator.clipboard.writeText(url); toast('Link copiado: '+CUR.ref); }
+  catch(e){ prompt('Copiá el link:', url); }
+}
+window.copiarLinkCotizacion = copiarLinkCotizacion;
 async function newVersion(id){
   const base = DB.quotes.find(x=>x.id===id);
   if(!base) return;
@@ -4676,6 +4715,7 @@ function renderEditor(isNew){
      ${(!isNew && CUR.id)?`<button class="btn ghost" onclick="newVersion('${CUR.id}')">${ICO.copy||ICO.plus} Nueva versión</button>`:''}
      ${(!isNew && CUR.id)?`<button class="btn ghost" onclick="duplicateQuote('${CUR.id}')" title="Crea una oferta NUEVA (número propio, versión 01) copiando cliente, ítems y condiciones. Distinto de 'Nueva versión', que mantiene el número de esta oferta.">${ICO.doc||ICO.plus} Duplicar</button>`:''}
      ${(!isNew && CUR.id)?`<button class="btn danger" onclick="delQuote('${CUR.id}')">Eliminar</button>`:''}
+     ${(!isNew && CUR.id)?`<button class="btn ghost" onclick="copiarLinkCotizacion()" title="Copiar un link directo a esta cotización (para pegar en el artifact de seguimiento, mail, etc.)">🔗 Link</button>`:''}
      ${(CUR.unidad==='ventas' && CUR.id)?`<button class="btn ghost" onclick="abrirCarpetaSP()" title="${CUR.sharepointUrl?'Abrir la carpeta del proyecto en SharePoint':'Crear la carpeta del proyecto en SharePoint'}">📁 ${CUR.sharepointUrl?'Carpeta SharePoint':'Crear carpeta SharePoint'}</button>`:''}
      ${(CUR.unidad==='ventas' && CUR.id)?`<button class="btn ghost" onclick="abrirArchivosSP()" title="Ver y subir archivos del proyecto en SharePoint">🗂️ Archivos</button>`:''}
      <button class="btn ghost" onclick="printQuote()">${ICO.print} Imprimir / PDF</button>
@@ -6383,6 +6423,7 @@ VIEWS.cierres = function(){
 
 // Arranque: 1) login Microsoft, 2) cargar Supabase, 3) mostrar panel
 (async function start(){
+  _stashDeepQuote();   // guardar el link pedido ANTES del login (sobrevive el redirect de OAuth)
   const ok = await initAuth();
   if(!ok) return; // la pantalla de login ya se mostró
   try{ await cargarPerfilComercial(); }catch(_){ /* sin perfil = acceso total (retrocompatible) */ }
@@ -6399,8 +6440,9 @@ VIEWS.cierres = function(){
   try{
     await reloadDB();
     try{ await cerrarMesesPendientes(); }catch(_){ /* el cierre es best-effort, no debe romper el arranque */ }
-    go('dashboard');
     aplicarVisibilidadVistas(); // Etapa 2: ocultar vistas sin permiso de visión
+    const _dq = _resolveDeepQuote();   // ¿vino un link directo a una cotización?
+    if(_dq){ editQuote(_dq.id); } else { go('dashboard'); }
     recordatoriosAlAbrir(); // avisa lo vencido/de hoy al comercial logueado (1 vez por día)
   }catch(e){
     if(c) c.innerHTML = '<div class="empty"><div style="font-weight:600;color:#b4554e">No se pudo conectar con la base de datos</div>'
