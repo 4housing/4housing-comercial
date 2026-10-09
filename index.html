@@ -1122,6 +1122,81 @@ function toggleSort(sortVar, col, render){
   if(s.col===col) s.dir = -s.dir; else { s.col=col; s.dir=1; }
   if(typeof render==='function') render();
 }
+
+/* ===== Filtro tipo Excel por columna (estándar de tablas, pedido de Mica) =====
+   Desplegable por columna con búsqueda + checkboxes, o rango de fechas. Mismo criterio
+   que la app de Compras. Se registra por "namespace" de tabla; el popup se monta en <body>
+   (no lo recorta el overflow del th). Convive con el orden por columna (sortTh) y el
+   redimensionado de columnas que ya tiene la app. */
+const XLF_STORE={}, XLF_DATE={}, XLF_DEF={};
+function xlfRegister(ns, def){ XLF_DEF[ns]=def; XLF_STORE[ns]=XLF_STORE[ns]||{}; }
+function xlfActive(ns,col){ if(col==='__fecha__') return !!(XLF_DATE[ns]&&(XLF_DATE[ns].desde||XLF_DATE[ns].hasta)); return !!(XLF_STORE[ns]&&XLF_STORE[ns][col]&&XLF_STORE[ns][col].length); }
+function xlfHasAny(ns){ return Object.keys(XLF_STORE[ns]||{}).length>0 || !!(XLF_DATE[ns]&&(XLF_DATE[ns].desde||XLF_DATE[ns].hasta)); }
+function xlfPass(ns,row,valFn){
+  const def=XLF_DEF[ns]; if(!def) return true;
+  const f=XLF_STORE[ns]||{}, getv=valFn||def.val;
+  if(def.dateVal && XLF_DATE[ns]){ const d=def.dateVal(row)||''; if(XLF_DATE[ns].desde && d<XLF_DATE[ns].desde) return false; if(XLF_DATE[ns].hasta && d>XLF_DATE[ns].hasta) return false; }
+  return Object.keys(f).every(col=>{ const allow=f[col]; if(!allow||!allow.length) return true; return allow.includes(getv(row,col)); });
+}
+function xlfUnique(ns,col){ const s=new Set(); (XLF_DEF[ns].rows()||[]).forEach(row=>{ const v=XLF_DEF[ns].val(row,col); if(v!=null && v!=='') s.add(v); }); return [...s].sort((a,b)=>String(a).localeCompare(String(b),'es',{numeric:true})); }
+function xlfClearAll(ns){ XLF_STORE[ns]={}; delete XLF_DATE[ns]; const cb=XLF_DEF[ns]&&XLF_DEF[ns].onChange; if(cb) cb(); }
+function xlfClose(){ const p=document.getElementById('xlfPop'); if(p) p.remove(); document.removeEventListener('mousedown', xlfOutside, true); }
+function xlfOutside(e){ const p=document.getElementById('xlfPop'); if(p && !p.contains(e.target) && !(e.target.closest && e.target.closest('.xlfbtn'))) xlfClose(); }
+function xlfOpen(ns,col,ev){
+  ev.stopPropagation(); const btn=ev.currentTarget; xlfClose();
+  const vals=xlfUnique(ns,col); const sel = XLF_STORE[ns][col] ? new Set(XLF_STORE[ns][col]) : new Set(vals);
+  const item=v=>'<label class="xlfitem" data-v="'+esc(v)+'" style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:pointer"><input type="checkbox" class="xlfchk" value="'+esc(v)+'" '+(sel.has(v)?'checked':'')+'>'+esc(v)+'</label>';
+  const pop=document.createElement('div'); pop.id='xlfPop'; pop.dataset.ns=ns; pop.dataset.col=col;
+  pop.style.cssText='position:absolute;z-index:9999;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px;min-width:210px;max-width:300px;font-size:12.5px;text-transform:none;letter-spacing:normal;color:#2C2C2A;font-weight:400';
+  pop.innerHTML='<input type="text" placeholder="Buscar" oninput="xlfSearch(this.value)" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin-bottom:6px;font-size:12.5px">'
+    +'<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;font-weight:700;border-bottom:1px solid var(--line);margin-bottom:4px;cursor:pointer"><input type="checkbox" '+(sel.size===vals.length?'checked':'')+' onchange="xlfToggleAll(this.checked)">(Seleccionar todo)</label>'
+    +'<div id="xlfList" style="max-height:220px;overflow:auto">'+vals.map(item).join('')+'</div>'
+    +'<div style="display:flex;gap:6px;margin-top:8px"><button class="btn" style="flex:1;padding:5px 8px" onclick="xlfApply()">Aplicar</button><button class="btn ghost" style="flex:1;padding:5px 8px" onclick="xlfClearCol()">Limpiar</button></div>';
+  document.body.appendChild(pop);
+  const r=btn.getBoundingClientRect(); const vw=document.documentElement.clientWidth;
+  pop.style.top=(window.scrollY+r.bottom+4)+'px'; pop.style.left=(window.scrollX+Math.max(8,Math.min(r.left, vw-310)))+'px';
+  setTimeout(()=>document.addEventListener('mousedown', xlfOutside, true),0);
+}
+function xlfSearch(q){ q=(q||'').toLowerCase(); document.querySelectorAll('#xlfList .xlfitem').forEach(el=>{ const m=el.getAttribute('data-v').toLowerCase().includes(q); el.style.display=m?'flex':'none'; if(q){ const c=el.querySelector('.xlfchk'); if(c) c.checked=m; } }); }
+function xlfToggleAll(ck){ document.querySelectorAll('#xlfList .xlfitem').forEach(el=>{ if(el.style.display!=='none'){ const c=el.querySelector('.xlfchk'); if(c) c.checked=ck; } }); }
+function xlfApply(){ const pop=document.getElementById('xlfPop'); if(!pop) return; const ns=pop.dataset.ns, col=pop.dataset.col; const all=[...document.querySelectorAll('#xlfList .xlfchk')]; const chk=all.filter(c=>c.checked).map(c=>c.value); if(chk.length===all.length){ delete XLF_STORE[ns][col]; } else { XLF_STORE[ns][col]=chk; } xlfClose(); const cb=XLF_DEF[ns].onChange; if(cb) cb(); }
+function xlfClearCol(){ const pop=document.getElementById('xlfPop'); if(!pop) return; const ns=pop.dataset.ns; delete XLF_STORE[ns][pop.dataset.col]; xlfClose(); const cb=XLF_DEF[ns].onChange; if(cb) cb(); }
+function xlfOpenDate(ns,ev){
+  ev.stopPropagation(); const btn=ev.currentTarget; xlfClose();
+  const cur=XLF_DATE[ns]||{desde:'',hasta:''};
+  const pop=document.createElement('div'); pop.id='xlfPop'; pop.dataset.ns=ns;
+  pop.style.cssText='position:absolute;z-index:9999;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:10px;min-width:200px;font-size:12.5px;text-transform:none;letter-spacing:normal;color:#2C2C2A;font-weight:400';
+  pop.innerHTML='<div style="font-weight:700;margin-bottom:6px">Rango de fechas</div>'
+    +'<label style="display:block;font-size:11px;color:var(--muted)">Desde</label><input type="date" id="xlfDesde" value="'+esc(cur.desde||'')+'" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin-bottom:6px;font-size:12.5px">'
+    +'<label style="display:block;font-size:11px;color:var(--muted)">Hasta</label><input type="date" id="xlfHasta" value="'+esc(cur.hasta||'')+'" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:12.5px">'
+    +'<div style="display:flex;gap:6px;margin-top:8px"><button class="btn" style="flex:1;padding:5px 8px" onclick="xlfDateApply()">Aplicar</button><button class="btn ghost" style="flex:1;padding:5px 8px" onclick="xlfDateClear()">Limpiar</button></div>';
+  document.body.appendChild(pop);
+  const r=btn.getBoundingClientRect(); const vw=document.documentElement.clientWidth;
+  pop.style.top=(window.scrollY+r.bottom+4)+'px'; pop.style.left=(window.scrollX+Math.max(8,Math.min(r.left, vw-240)))+'px';
+  setTimeout(()=>document.addEventListener('mousedown', xlfOutside, true),0);
+}
+function xlfDateApply(){ const pop=document.getElementById('xlfPop'); if(!pop) return; const ns=pop.dataset.ns; XLF_DATE[ns]={desde:(document.getElementById('xlfDesde').value||''), hasta:(document.getElementById('xlfHasta').value||'')}; xlfClose(); const cb=XLF_DEF[ns].onChange; if(cb) cb(); }
+function xlfDateClear(){ const pop=document.getElementById('xlfPop'); if(!pop) return; const ns=pop.dataset.ns; delete XLF_DATE[ns]; xlfClose(); const cb=XLF_DEF[ns].onChange; if(cb) cb(); }
+// <th> con orden (reusa sortTh) + botón de filtro tipo Excel (▾).
+function sortFilterTh(label, col, sortVar, renderCall, ns, fCol, cls){
+  let th = sortTh(label, col, sortVar, renderCall, cls);
+  if(ns && fCol){
+    const opener = fCol==='__fecha__' ? ("xlfOpenDate('"+ns+"',event)") : ("xlfOpen('"+ns+"','"+fCol+"',event)");
+    const on = xlfActive(ns,fCol);
+    const btn=' <button class="xlfbtn" onclick="'+opener+'" title="Filtrar" style="border:none;background:none;cursor:pointer;padding:0 2px;font-size:11px;vertical-align:middle;color:'+(on?'var(--olive-deep)':'var(--muted)')+'">▾</button>';
+    th = th.replace('</th>', btn+'</th>');
+  }
+  return th;
+}
+function xlfClearBtn(ns, cls){ return xlfHasAny(ns) ? '<button class="'+(cls||'btn ghost')+'" onclick="xlfClearAll(\''+ns+'\')">Limpiar filtros</button>' : ''; }
+// Auto-ajustar columnas: borra los anchos guardados y re-congela al ancho natural (reusa el resize existente).
+function tblAutofit(sel){
+  const t=(typeof sel==='string')?document.querySelector(sel):sel; if(!t||!t.tHead||!t.tHead.rows.length) return;
+  try{ localStorage.removeItem(_firmaTabla(t)); }catch(_){}
+  t.style.tableLayout=''; t.style.width='';
+  [...t.tHead.rows[0].cells].forEach(th=>{ th.style.width=''; });
+  try{ habilitarResizeColumnas(t.closest('.grid-scroll')||t.parentElement||document); }catch(_){}
+}
 // Cliente: TODO EN MAYÚSCULA
 function upperName(s){ return String(s==null?'':s).toLocaleUpperCase('es-AR'); }
 // Resto de campos: Primera Letra De Cada Palabra En Mayúscula, resto minúscula
@@ -1344,16 +1419,17 @@ VIEWS.dashboard = function(){
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           ${vendedorFilterSelect('dVend')}
+          <button class="btn ghost" onclick="tblAutofit('#tblPanel')">Auto-ajustar columnas</button>
           ${dashFilter?`<button class="btn ghost" onclick="dashSelect(null)">Ver recientes</button>`:''}
           <button class="btn" onclick="newQuote()">${ICO.plus} Nueva cotización</button>
         </div>
       </div>
       ${esOppsHoy
-        ? (oppsListed.length? `<table class="grid">
+        ? (oppsListed.length? `<table class="grid" id="tblPanel">
             <thead><tr><th>Ref.</th><th>Cliente / Organismo</th><th>Tipo</th><th>Prioridad</th><th>Estado</th><th>Fecha límite</th><th class="r">Valor</th></tr></thead>
             <tbody>${oppsListed.map(rowOpp).join('')}</tbody></table>`
           : emptyState('Sin oportunidades','No hay oportunidades de rental cargadas hoy.'))
-        : (listed.length? `<table class="grid">
+        : (listed.length? `<table class="grid" id="tblPanel">
             <thead><tr><th>Ref.</th><th>Cliente</th><th>Atención</th><th>Comercial</th><th>Estado</th><th class="r">Total</th><th class="r">Fecha</th></tr></thead>
             <tbody>${groupQuotes(listed).map(rowGroupDash).join('')}</tbody></table>`
           : emptyState('Sin cotizaciones','No hay cotizaciones para este indicador.'))}
@@ -1465,6 +1541,10 @@ VIEWS.quotes = function(){
   // Cotizaciones formales (tabla cotizaciones) — solo unidad rental (las de ventas viven en su propia vista)
   let list=DB.quotes.filter(q=> q.unidad!=='ventas');
 
+  // Filtro tipo Excel por columna (estándar de tablas)
+  xlfRegister('qx', { rows:()=>DB.quotes.filter(q=> q.unidad!=='ventas'), onChange:VIEWS.quotes, dateVal:x=>x.dateISO||'',
+    val:(x,col)=>{ if(col==='client') return x.client||'(sin cliente)'; if(col==='comercial') return x.comercial||'(sin comercial)'; if(col==='state') return stLabel(x.state)||'(sin estado)'; if(col==='proyecto') return x.proyecto||'(sin proyecto)'; return ''; } });
+
   // filtro por estado (aplica a ambos)
   if(quoteFilterSet.size){
     list=list.filter(x=>quoteFilterSet.has(x.state));
@@ -1485,6 +1565,14 @@ VIEWS.quotes = function(){
     list=list.filter(x=>x.comercial===filtroVendedor);
     opps=opps.filter(o=>o.comercial===filtroVendedor);
   }
+  // Filtros tipo Excel por columna (cliente/comercial/estado/proyecto/fecha).
+  // En las oportunidades solo aplican las columnas que comparten; si está activo un
+  // filtro de columna que la oportunidad no tiene (proyecto/fecha), queda fuera.
+  if(xlfHasAny('qx')){
+    const oppXlfVal=(o,col)=>{ if(col==='client') return oppClientName(o)||'(sin cliente)'; if(col==='comercial') return o.comercial||'(sin comercial)'; if(col==='state') return stLabel(o.state)||'(sin estado)'; return ''; };
+    list = list.filter(x=>xlfPass('qx',x));
+    opps = opps.filter(o=>xlfPass('qx',o,oppXlfVal));
+  }
   // filtro por tipo de fila: OP (oportunidades) u OE (ofertas económicas)
   if(quoteTipoFilter==='op') list=[];
   else if(quoteTipoFilter==='oe') opps=[];
@@ -1504,17 +1592,21 @@ VIEWS.quotes = function(){
         <button class="pill ${quoteFilterSet.size===0?'active':''}" data-f="all">Todas</button>
         ${STATES.map(s=>`<button class="pill ${quoteFilterSet.has(s.id)?'active':''}" data-f="${s.id}">${s.label}</button>`).join('')}
       </div>
+      <div class="filteracts" style="display:flex;gap:8px;align-items:center">
+        ${xlfClearBtn('qx')}
+        <button class="btn ghost" onclick="tblAutofit('#tblRental')">Auto-ajustar columnas</button>
+      </div>
     </div>
     <div class="card">
-      ${hayAlgo? `<table class="grid">
+      ${hayAlgo? `<table class="grid" id="tblRental">
         <thead><tr>
           ${sortTh('Ref.','ref','quoteSort','VIEWS.quotes')}
-          ${sortTh('Cliente','client','quoteSort','VIEWS.quotes')}
-          ${sortTh('Comercial','comercial','quoteSort','VIEWS.quotes')}
-          ${sortTh('Estado','state','quoteSort','VIEWS.quotes')}
+          ${sortFilterTh('Cliente','client','quoteSort','VIEWS.quotes','qx','client')}
+          ${sortFilterTh('Comercial','comercial','quoteSort','VIEWS.quotes','qx','comercial')}
+          ${sortFilterTh('Estado','state','quoteSort','VIEWS.quotes','qx','state')}
           ${sortTh('Total','total','quoteSort','VIEWS.quotes','r')}
-          ${sortTh('Fecha','fecha','quoteSort','VIEWS.quotes','r')}
-          ${sortTh('Proyecto','proyecto','quoteSort','VIEWS.quotes')}
+          ${sortFilterTh('Fecha','fecha','quoteSort','VIEWS.quotes','qx','__fecha__','r')}
+          ${sortFilterTh('Proyecto','proyecto','quoteSort','VIEWS.quotes','qx','proyecto')}
           ${sortTh('Fecha de envío','fechaEnvio','quoteSort','VIEWS.quotes','r')}
           <th></th>
         </tr></thead>
@@ -2826,6 +2918,10 @@ VIEWS.ventas = function(){
   // Cotizaciones formales de la unidad Ventas
   let list = DB.quotes.filter(q=> q.unidad==='ventas');
 
+  // Filtro tipo Excel por columna (estándar de tablas)
+  xlfRegister('vx', { rows:()=>DB.quotes.filter(q=> q.unidad==='ventas'), onChange:VIEWS.ventas, dateVal:x=>x.dateISO||'',
+    val:(x,col)=>{ if(col==='client') return x.client||'(sin cliente)'; if(col==='comercial') return x.comercial||'(sin comercial)'; if(col==='state') return stLabel(x.state)||'(sin estado)'; if(col==='proyecto') return x.proyecto||'(sin proyecto)'; return ''; } });
+
   // filtro por estado (aplica a ambos)
   if(ventasFilterSet.size){
     list = list.filter(q=> ventasFilterSet.has(q.state));
@@ -2845,6 +2941,12 @@ VIEWS.ventas = function(){
   if(filtroVendedor){
     list = list.filter(q=> q.comercial===filtroVendedor);
     opps = opps.filter(o=> o.comercial===filtroVendedor);
+  }
+  // Filtros tipo Excel por columna (mismo criterio que Rental)
+  if(xlfHasAny('vx')){
+    const oppXlfVal=(o,col)=>{ if(col==='client') return oppClientName(o)||'(sin cliente)'; if(col==='comercial') return o.comercial||'(sin comercial)'; if(col==='state') return stLabel(o.state)||'(sin estado)'; return ''; };
+    list = list.filter(x=>xlfPass('vx',x));
+    opps = opps.filter(o=>xlfPass('vx',o,oppXlfVal));
   }
   // filtro por tipo de fila: OP (oportunidades) u OE (ofertas económicas)
   if(ventasTipoFilter==='op') list=[];
@@ -2885,17 +2987,21 @@ VIEWS.ventas = function(){
         <button class="pill ${ventasFilterSet.size===0?'active':''}" data-f="all">Todas</button>
         ${STATES.map(s=>`<button class="pill ${ventasFilterSet.has(s.id)?'active':''}" data-f="${s.id}">${s.label}</button>`).join('')}
       </div>
+      <div class="filteracts" style="display:flex;gap:8px;align-items:center">
+        ${xlfClearBtn('vx')}
+        <button class="btn ghost" onclick="tblAutofit('#tblVentas')">Auto-ajustar columnas</button>
+      </div>
     </div>
     <div class="card">
-      ${hayAlgo? `<table class="grid">
+      ${hayAlgo? `<table class="grid" id="tblVentas">
         <thead><tr>
           ${sortTh('Ref.','ref','ventasSort','VIEWS.ventas')}
-          ${sortTh('Cliente','client','ventasSort','VIEWS.ventas')}
-          ${sortTh('Comercial','comercial','ventasSort','VIEWS.ventas')}
-          ${sortTh('Estado','state','ventasSort','VIEWS.ventas')}
+          ${sortFilterTh('Cliente','client','ventasSort','VIEWS.ventas','vx','client')}
+          ${sortFilterTh('Comercial','comercial','ventasSort','VIEWS.ventas','vx','comercial')}
+          ${sortFilterTh('Estado','state','ventasSort','VIEWS.ventas','vx','state')}
           ${sortTh('Total','total','ventasSort','VIEWS.ventas','r')}
-          ${sortTh('Fecha','fecha','ventasSort','VIEWS.ventas','r')}
-          ${sortTh('Proyecto','proyecto','ventasSort','VIEWS.ventas')}
+          ${sortFilterTh('Fecha','fecha','ventasSort','VIEWS.ventas','vx','__fecha__','r')}
+          ${sortFilterTh('Proyecto','proyecto','ventasSort','VIEWS.ventas','vx','proyecto')}
           ${sortTh('Fecha de envío','fechaEnvio','ventasSort','VIEWS.ventas','r')}
           <th></th>
         </tr></thead>
