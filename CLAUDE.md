@@ -128,6 +128,19 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
   `td.nowrap` selectivo para celdas de contenido corto. NO usar
   `white-space:nowrap` global (rompe tablas anchas) ni `table-layout:fixed`
   con ellipsis (corta contenido).
+- **Tablas — estándar (pedido de Mica):** toda tabla de datos (`table.grid`) lleva:
+  (1) **orden por columna** — `sortTh(label,col,sortVar,renderCall,cls)` + `toggleSort`
+  + un `window.<algoSort>={col,dir}`; (2) **columnas redimensionables** — automático
+  vía `habilitarResizeColumnas` (MutationObserver sobre `#content`, ancho guardado en
+  localStorage por firma `_firmaTabla`); (3) **filtros tipo Excel por columna** —
+  `xlfRegister(ns,{rows,val,dateVal,onChange})` + `sortFilterTh(label,col,sortVar,
+  renderCall,ns,fCol,cls)` (el `fCol` `'__fecha__'` da rango de fechas), se filtra la
+  lista con `xlfPass(ns,row[,valFn])` antes de renderizar, y `xlfClearBtn(ns)` limpia;
+  (4) **botón "Auto-ajustar columnas"** — `tblAutofit('#idTabla')`. El popup del filtro
+  se monta en `<body>` (no lo recorta `th{overflow:hidden}`). Aplicado en Ventas,
+  Rental y Panel (ver commits 7f4696e/9311d0a). Para tablas que mezclan filas de
+  oportunidad y de cotización, pasar un `valFn` a `xlfPass` para las OP (solo las
+  columnas que comparten).
 - **Power Automate:** los triggers HTTP del tenant requieren OAuth; se usa la
   URL firmada del Teams Workflow (`COBRANZA_WEBHOOK_URL`), que acepta POST
   anónimo sin problemas de CORS.
