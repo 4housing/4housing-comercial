@@ -3172,12 +3172,12 @@ VIEWS.dashboard_ventas = function(){
     subLista = 'Tocá de nuevo el indicador para quitar el filtro';
     if(f==='ganada'){
       // Vista con el cruce cotizada→ganada por negocio.
-      bodyHtml = qs.length ? `<table class="grid">
+      bodyHtml = qs.length ? `<table class="grid" id="tblPanelVentas">
           <thead><tr><th>Ref.</th><th>Cliente</th><th>Comercial</th><th class="r">Total</th><th>Cotizada</th><th>Ganada</th></tr></thead>
           <tbody>${qs.map(rowQuoteGanada).join('')}</tbody></table>`
         : `<div class="empty" style="padding:40px">No hay cotizaciones ganadas este mes.</div>`;
     } else {
-      bodyHtml = qs.length ? `<table class="grid">
+      bodyHtml = qs.length ? `<table class="grid" id="tblPanelVentas">
           <thead><tr><th>Ref.</th><th>Cliente</th><th>Comercial</th><th>Estado</th><th class="r">Total</th><th class="r">Fecha</th></tr></thead>
           <tbody>${qs.map(rowQuoteMini).join('')}</tbody></table>`
         : `<div class="empty" style="padding:40px">No hay cotizaciones con este filtro.</div>`;
@@ -3193,7 +3193,7 @@ VIEWS.dashboard_ventas = function(){
     tituloLista = 'Oportunidades de ventas' + (f?' · filtradas':'');
     subLista = f ? 'Tocá de nuevo el indicador para quitar el filtro'
                  : 'Oportunidades aún sin cotizar. Las cotizadas viven en la pestaña Cotizaciones.';
-    bodyHtml = list.length ? `<table class="grid">
+    bodyHtml = list.length ? `<table class="grid" id="tblPanelVentas">
         <thead><tr><th>Ref.</th><th>Cliente / Organismo</th><th>Tipo</th><th>Prioridad</th><th>Estado</th><th>Fecha límite</th><th class="r">Valor</th></tr></thead>
         <tbody>${list.map(rowOpp).join('')}</tbody></table>`
       : `<div class="empty" style="padding:40px">No hay oportunidades${f?' con este filtro':' sin cotizar'}.</div>`;
@@ -3216,7 +3216,10 @@ VIEWS.dashboard_ventas = function(){
           <div style="font-size:15px;font-weight:700;color:#37432c">${tituloLista}</div>
           <div class="help" style="margin-top:3px">${subLista}</div>
         </div>
-        <button class="btn" onclick="newOppVentas()">${ICO.plus} Nueva oportunidad</button>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn ghost" onclick="tblAutofit('#tblPanelVentas')">Auto-ajustar columnas</button>
+          <button class="btn" onclick="newOppVentas()">${ICO.plus} Nueva oportunidad</button>
+        </div>
       </div>
       ${bodyHtml}
     </div></div>
