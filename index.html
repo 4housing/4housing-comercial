@@ -105,6 +105,19 @@ tr.ver-child td:first-child{padding-left:38px;position:relative;}
 tr.ver-child td:first-child::before{content:"";position:absolute;left:22px;top:0;bottom:0;width:2px;background:var(--line-strong);}
 tr.ver-child.hide{display:none;}
 .ver-tag{font-size:11px;font-weight:600;color:#94917f;}
+/* Prolijidad (pedido de Pablo): Panel y Cotizaciones de Rental/Ventas — títulos y celdas
+   centrados (horizontal y vertical) y tamaño de letra parejo. Acotado a estas 4 tablas. */
+#tblRental th,#tblRental td,#tblVentas th,#tblVentas td,
+#tblPanel th,#tblPanel td,#tblPanelVentas th,#tblPanelVentas td{
+  text-align:center !important; vertical-align:middle !important;
+}
+#tblRental td,#tblVentas td,#tblPanel td,#tblPanelVentas td{ font-size:12.5px; }
+#tblRental .ver-toggle,#tblVentas .ver-toggle,#tblPanel .ver-toggle,#tblPanelVentas .ver-toggle{ justify-content:center; }
+/* el árbol de versiones no necesita la sangría ni la línea izquierda cuando va centrado */
+#tblRental tr.ver-child td:first-child,#tblVentas tr.ver-child td:first-child,
+#tblPanel tr.ver-child td:first-child,#tblPanelVentas tr.ver-child td:first-child{ padding-left:16px; }
+#tblRental tr.ver-child td:first-child::before,#tblVentas tr.ver-child td:first-child::before,
+#tblPanel tr.ver-child td:first-child::before,#tblPanelVentas tr.ver-child td:first-child::before{ display:none; }
 .empty{padding:42px 20px;text-align:center;color:var(--muted);font-size:14px;}
 .empty svg{width:40px;height:40px;color:var(--line-strong);margin-bottom:10px;}
 
