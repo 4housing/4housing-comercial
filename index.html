@@ -1719,7 +1719,13 @@ let _perfilCom = null; // { esDir, rol, ver, editar } | null
 const SECCIONES_REPORTE_COM = new Set(['dashboard','dashboard_ventas','audit','cierres','indicadores']); // sin edición → sin cartel
 function _comVerSet(){ if(!_perfilCom||_perfilCom.esDir) return null; if(Array.isArray(_perfilCom.ver)) return new Set(_perfilCom.ver); return null; }
 function _comEditSet(){ if(!_perfilCom||_perfilCom.esDir) return null; if(_perfilCom.rol==='lector'||_perfilCom.rol==='lectura') return new Set(); if(Array.isArray(_perfilCom.editar)) return new Set(_perfilCom.editar); return null; }
-function comPuedeVer(sec){ if(!sec) return true; const s=_comVerSet(); return s===null||s.has(sec); }
+// 'indicadores' se exceptúa del array `ver`: es una sección que se agregó
+// DESPUÉS de que se configuraran los permisos del equipo, así que no figura en
+// el `ver` de nadie y el menú la ocultaría para todos. Exceptuarla acá evita
+// tener que reescribir los permisos ya cargados de cada persona. No cambia
+// nada para las secciones que ya existían. Lectura no es un problema: el RLS
+// de las tablas ind_ ya deja leer a todo el sector comercial.
+function comPuedeVer(sec){ if(!sec) return true; if(sec==='indicadores') return true; const s=_comVerSet(); return s===null||s.has(sec); }
 function comPuedeEditar(sec){ if(!sec) return true; const s=_comEditSet(); return s===null||s.has(sec); }
 function comEdicionActual(){ return comPuedeEditar(current); }
 async function cargarPerfilComercial(){
@@ -7505,11 +7511,16 @@ async function indInit(){
   if(av) av.textContent = nom.substring(0,2).toUpperCase();
   const sa = document.getElementById('user-greeting');
   if(sa) sa.textContent = nom;
-  // El tab Datos borra tablas enteras y reinserta: se muestra solo a quien
-  // tenga permiso de edicion sobre la seccion, con la misma funcion que usa
-  // el resto del CRM. El RLS lo vuelve a chequear del lado del servidor.
+  // El tab Datos borra tablas enteras y reinserta. Quien puede hacerlo lo
+  // decide la tabla ind_editores, y se consulta por la MISMA funcion que usa
+  // el RLS: asi la interfaz y la base nunca pueden discrepar, y si el RPC
+  // falla el tab queda oculto (fallar cerrado).
+  //
+  // A proposito NO se usa comPuedeEditar() del CRM: eso obligaria a escribir
+  // en perfiles_sector para dar de alta a alguien, y los permisos del CRM no
+  // se tocan. Indicadores maneja los suyos aparte.
   let puede = false;
-  try{ puede = (typeof comPuedeEditar!=='function') || comPuedeEditar('indicadores'); }catch(_){ puede = false; }
+  try{ const r = await sb.rpc('ind_puede_editar'); puede = (r && r.data === true); }catch(_){ puede = false; }
   const datosTab = document.getElementById('tab-datos');
   if(datosTab) datosTab.style.display = puede ? 'flex' : 'none';
   const ver = document.getElementById('app-ver');

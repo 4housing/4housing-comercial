@@ -180,6 +180,30 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
     cambiar de vista y volver.
   - **Chart.js 4.4.1 se carga diferido**, recién al entrar a la vista por primera
     vez, para no cobrarle 200 KB a quien nunca la abre.
+  - **Permisos: Indicadores NO usa los del CRM, y es a propósito.**
+    - *Ver el ítem del menú:* `comPuedeVer()` devuelve `true` para
+      `'indicadores'` con un early-return. Es una sección que se agregó
+      **después** de que se configuraran los permisos del equipo, así que no
+      figura en el array `ver` de nadie y el menú la habría ocultado para
+      todos. Exceptuarla evita reescribir los permisos ya cargados de cada
+      persona. No cambia nada para las secciones que ya existían, y leer no es
+      un riesgo porque el RLS de las tablas `ind_` ya deja leer a todo el
+      sector.
+    - *Cargar datos (el tab "Datos", que borra tablas enteras):* lo decide la
+      tabla **`ind_editores`** (mail + nota), no `perfiles_sector`. La primera
+      versión leía `perfiles_sector.permisos`, pero eso obligaba a **escribir**
+      en una tabla del CRM para dar de alta a alguien. Se descartó: los
+      permisos del CRM no se tocan. Alta y baja son un insert/delete en
+      `ind_editores`.
+    - `ind_editores` tiene **RLS activo y cero políticas**, y los grants
+      revocados a `anon` y `authenticated`: nadie la lee ni la escribe desde la
+      app. `ind_puede_editar()` la lee igual porque es `security definer`. Sin
+      esto, cualquiera se daría permiso a sí mismo para borrar el histórico.
+    - La interfaz pregunta por `sb.rpc('ind_puede_editar')`, **la misma función
+      que usa el RLS**, así que el botón y la base nunca pueden discrepar. Si
+      el RPC falla, el tab queda oculto (falla cerrado).
+    - Dirección **no** tiene permiso automático de carga: si se quiere, se
+      agrega el mail a `ind_editores`.
   - Se perdió el login biométrico propio (WebAuthn): ahora lo maneja Microsoft.
   - **Pendiente:** migrar los datos del proyecto viejo. Hasta que eso pase, la
     vista se ve vacía. El proyecto `zziktktjsnkmtaqwghha` y el deploy de Vercel
