@@ -394,13 +394,47 @@ end $$;
 
 
 -- ----------------------------------------------------------------------------
--- 5. HABILITAR A QUIEN CARGA LOS DATOS
+-- 5. PERMISOS DE LA SECCIÓN NUEVA — son DOS cosas distintas
 -- ----------------------------------------------------------------------------
--- Sin esto NADIE puede subir el Excel (salvo Dirección, que pasa por
--- es_direccion). Correr una vez por cada persona que deba cargar datos,
--- reemplazando el mail.
+-- 'indicadores' es una sección más del CRM, así que entra en el mismo esquema
+-- de permisos que el resto (`perfiles_sector.permisos`, con sus arrays `ver` y
+-- `editar`). Hay que tocar los dos, y son independientes:
 --
--- Descomentar y ajustar:
+--   ver    -> si NO está, el botón del menú se OCULTA (index.html, en el
+--             forEach que hace `b.style.display = comPuedeVer(sec) ? '' : 'none'`).
+--             Va para todo el que deba mirar los indicadores.
+--   editar -> si NO está, se ve la vista pero no se puede subir el Excel.
+--             Va SOLO para quien cargue datos: ese botón borra tablas enteras.
+--
+-- OJO con la asimetría: quien NO tiene `permisos` configurados ve y edita todo
+-- (el JS es retrocompatible) y no necesita nada de esto. Los updates de abajo
+-- solo tocan a quien SÍ tiene el array configurado. Dirección tampoco lo
+-- necesita: pasa por `es_direccion`.
+--
+-- Ver cómo está parado el equipo antes de tocar nada:
+--
+-- select u.email, p.es_direccion, ps.cargo,
+--        ps.permisos -> 'ver'    as ve_hoy,
+--        ps.permisos -> 'editar' as edita_hoy
+--   from public.perfiles_sector ps
+--   join auth.users u on u.id = ps.perfil_id
+--   left join public.perfiles p on p.id = ps.perfil_id
+--  where ps.sector = 'fhcomercial'
+--  order by u.email;
+
+-- 5.a  VER — para todo el equipo comercial con permisos configurados.
+--      Para acotarlo a algunas personas, agregar:  and u.email in ('a@...','b@...')
+--
+-- update public.perfiles_sector ps
+--    set permisos = jsonb_set(ps.permisos::jsonb, '{ver}',
+--          (ps.permisos::jsonb -> 'ver') || '["indicadores"]'::jsonb, true)
+--   from auth.users u
+--  where u.id = ps.perfil_id
+--    and ps.sector = 'fhcomercial'
+--    and jsonb_typeof(ps.permisos::jsonb -> 'ver') = 'array'
+--    and not (ps.permisos::jsonb -> 'ver') ? 'indicadores';
+
+-- 5.b  EDITAR — SOLO para quien cargue los datos. Una vez por persona.
 --
 -- update public.perfiles_sector ps
 --    set permisos = jsonb_set(
@@ -413,6 +447,16 @@ end $$;
 --    and ps.sector = 'fhcomercial'
 --    and u.email = 'ignaciosanchez@4housing.com.ar'
 --    and not coalesce((ps.permisos::jsonb -> 'editar') ? 'indicadores', false);
+
+-- 5.c  VERIFICAR
+--
+-- select u.email,
+--        (ps.permisos::jsonb -> 'ver')    ? 'indicadores' as ve_indicadores,
+--        (ps.permisos::jsonb -> 'editar') ? 'indicadores' as carga_datos
+--   from public.perfiles_sector ps
+--   join auth.users u on u.id = ps.perfil_id
+--  where ps.sector = 'fhcomercial'
+--  order by u.email;
 
 
 -- ----------------------------------------------------------------------------
