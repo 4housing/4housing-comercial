@@ -65,16 +65,25 @@
 -- ############################################################################
 
 -- (A) proyecto VIEJO — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from public.facturacion_data t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_facturacion_data
        (mes_anio,modelo_negocio,importe_pesos,created_at)
 select mes_anio,modelo_negocio,importe_pesos,created_at
-  from jsonb_populate_recordset(null::public.ind_facturacion_data, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_facturacion_data, datos.filas)
  where (select count(*) from public.ind_facturacion_data) = 0;   -- debe insertar 4
 
 -- ############################################################################
@@ -82,16 +91,25 @@ $json$::jsonb)
 -- ############################################################################
 
 -- (A) proyecto VIEJO — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from public.ipc_data t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_ipc_data
        (anio,mes,mes_anio,ipc_mensual,ipc_acumulado,created_at)
 select anio,mes,mes_anio,ipc_mensual,ipc_acumulado,created_at
-  from jsonb_populate_recordset(null::public.ind_ipc_data, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_ipc_data, datos.filas)
  where (select count(*) from public.ind_ipc_data) = 0;   -- debe insertar 9
 
 -- ############################################################################
@@ -99,16 +117,25 @@ $json$::jsonb)
 -- ############################################################################
 
 -- (A) proyecto VIEJO — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from public.chat_messages t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_chat_messages
        (user_email,user_name,message,created_at)
 select user_email,user_name,message,created_at
-  from jsonb_populate_recordset(null::public.ind_chat_messages, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_chat_messages, datos.filas)
  where (select count(*) from public.ind_chat_messages) = 0;   -- debe insertar 10
 
 -- ############################################################################
@@ -116,16 +143,25 @@ $json$::jsonb)
 -- ############################################################################
 
 -- (A) proyecto VIEJO — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from public.notifications t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_notifications
        (title,body,read,created_at)
 select title,body,read,created_at
-  from jsonb_populate_recordset(null::public.ind_notifications, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_notifications, datos.filas)
  where (select count(*) from public.ind_notifications) = 0;   -- debe insertar 10
 
 -- ############################################################################
@@ -133,18 +169,27 @@ $json$::jsonb)
 -- ############################################################################
 
 -- (A) proyecto VIEJO — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from public.dtm_data t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_dtm_data
        (anio,mes,mes_anio,serie,modelo_negocio,tipo_servicio,descripcion,
        costo,facturacion_dtm,created_at)
 select anio,mes,mes_anio,serie,modelo_negocio,tipo_servicio,descripcion,
        costo,facturacion_dtm,created_at
-  from jsonb_populate_recordset(null::public.ind_dtm_data, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_dtm_data, datos.filas)
  where (select count(*) from public.ind_dtm_data) = 0;   -- debe insertar 21
 
 -- ############################################################################
@@ -152,18 +197,27 @@ $json$::jsonb)
 -- ############################################################################
 
 -- (A) proyecto VIEJO — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from public.clientes_data t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_clientes_data
        (tipo,mes,activos,nuevos,altas,bajas,serie,tipologia,cliente,
        created_at)
 select tipo,mes,activos,nuevos,altas,bajas,serie,tipologia,cliente,
        created_at
-  from jsonb_populate_recordset(null::public.ind_clientes_data, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_clientes_data, datos.filas)
  where (select count(*) from public.ind_clientes_data) = 0;   -- debe insertar 82
 
 -- ############################################################################
@@ -171,10 +225,21 @@ $json$::jsonb)
 -- ############################################################################
 
 -- (A) proyecto VIEJO — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from public.stock_items t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_stock_items
        (serie,if_codigo,tipo,medida,modulo,tipologia,modelo_negocio,estado,
        sucursal,ubicacion,cliente,cliente_codigo,contacto,fecha_entrega,
@@ -184,9 +249,7 @@ select serie,if_codigo,tipo,medida,modulo,tipologia,modelo_negocio,estado,
        sucursal,ubicacion,cliente,cliente_codigo,contacto,fecha_entrega,
        fecha_devolucion,vto_oc,propiedad,detalle,moneda,tarifa_lista,
        importe_mensual,actualizado_en,actualizado_por
-  from jsonb_populate_recordset(null::public.ind_stock_items, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_stock_items, datos.filas)
  where (select count(*) from public.ind_stock_items) = 0;   -- debe insertar 237
 
 -- ############################################################################
@@ -195,34 +258,52 @@ $json$::jsonb)
 
 -- --- TANDA 1 de 2: filas 1 a 500 ---------------------------------
 -- (A) proyecto VIEJO  ·  TANDA 1 de 2 — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from (select * from public.stock_movimientos order by id limit 500 offset 0) t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_stock_movimientos
        (serie,fecha,tipo,estado_ant,estado_nuevo,cliente_ant,cliente_nuevo,
        importe_ant,importe_nuevo,nota,usuario,orden)
 select serie,fecha,tipo,estado_ant,estado_nuevo,cliente_ant,cliente_nuevo,
        importe_ant,importe_nuevo,nota,usuario,orden
-  from jsonb_populate_recordset(null::public.ind_stock_movimientos, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_stock_movimientos, datos.filas)
  where (select count(*) from public.ind_stock_movimientos) = 0;   -- debe insertar 500
 
 -- --- TANDA 2 de 2: filas 501 a 531 ---------------------------------
 -- (A) proyecto VIEJO  ·  TANDA 2 de 2 — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from (select * from public.stock_movimientos order by id limit 31 offset 500) t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_stock_movimientos
        (serie,fecha,tipo,estado_ant,estado_nuevo,cliente_ant,cliente_nuevo,
        importe_ant,importe_nuevo,nota,usuario,orden)
 select serie,fecha,tipo,estado_ant,estado_nuevo,cliente_ant,cliente_nuevo,
        importe_ant,importe_nuevo,nota,usuario,orden
-  from jsonb_populate_recordset(null::public.ind_stock_movimientos, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_stock_movimientos, datos.filas)
  where (select count(*) from public.ind_stock_movimientos) = 500;   -- debe insertar 31
 
 -- ############################################################################
@@ -231,66 +312,102 @@ $json$::jsonb)
 
 -- --- TANDA 1 de 4: filas 1 a 500 ---------------------------------
 -- (A) proyecto VIEJO  ·  TANDA 1 de 4 — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from (select * from public.rental_data order by id limit 500 offset 0) t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_rental_data
        (serie,cliente,tipologia,modelo_negocio,anio,mes,mes_anio,moneda,
        importe_mensual,estado_serie,tipo_cambio,importe_pesos,created_at)
 select serie,cliente,tipologia,modelo_negocio,anio,mes,mes_anio,moneda,
        importe_mensual,estado_serie,tipo_cambio,importe_pesos,created_at
-  from jsonb_populate_recordset(null::public.ind_rental_data, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_rental_data, datos.filas)
  where (select count(*) from public.ind_rental_data) = 0;   -- debe insertar 500
 
 -- --- TANDA 2 de 4: filas 501 a 1000 ---------------------------------
 -- (A) proyecto VIEJO  ·  TANDA 2 de 4 — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from (select * from public.rental_data order by id limit 500 offset 500) t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_rental_data
        (serie,cliente,tipologia,modelo_negocio,anio,mes,mes_anio,moneda,
        importe_mensual,estado_serie,tipo_cambio,importe_pesos,created_at)
 select serie,cliente,tipologia,modelo_negocio,anio,mes,mes_anio,moneda,
        importe_mensual,estado_serie,tipo_cambio,importe_pesos,created_at
-  from jsonb_populate_recordset(null::public.ind_rental_data, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_rental_data, datos.filas)
  where (select count(*) from public.ind_rental_data) = 500;   -- debe insertar 500
 
 -- --- TANDA 3 de 4: filas 1001 a 1500 ---------------------------------
 -- (A) proyecto VIEJO  ·  TANDA 3 de 4 — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from (select * from public.rental_data order by id limit 500 offset 1000) t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_rental_data
        (serie,cliente,tipologia,modelo_negocio,anio,mes,mes_anio,moneda,
        importe_mensual,estado_serie,tipo_cambio,importe_pesos,created_at)
 select serie,cliente,tipologia,modelo_negocio,anio,mes,mes_anio,moneda,
        importe_mensual,estado_serie,tipo_cambio,importe_pesos,created_at
-  from jsonb_populate_recordset(null::public.ind_rental_data, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_rental_data, datos.filas)
  where (select count(*) from public.ind_rental_data) = 1000;   -- debe insertar 500
 
 -- --- TANDA 4 de 4: filas 1501 a 1829 ---------------------------------
 -- (A) proyecto VIEJO  ·  TANDA 4 de 4 — copiar la celda entera:
-select coalesce(json_agg(t order by t.id)::text, '[]')
+select coalesce(json_agg(t order by t.id)::text, '[]') as datos
   from (select * from public.rental_data order by id limit 329 offset 1500) t;
 
 -- (B) proyecto del CRM — pegar el JSON entre los $json$:
+with pegado as (select $json$
+[]
+$json$::jsonb as j),
+-- El editor de Supabase no copia el texto de la celda: copia el
+-- resultado entero envuelto, o sea [{"datos": "<el json escapado>"}].
+-- Esto acepta esa forma Y tambien el json crudo, asi no importa como
+-- haya salido el copiar.
+datos as (select case
+    when jsonb_typeof(j) = 'array' and jsonb_typeof(j -> 0) = 'object'
+         and (j -> 0) ? 'datos' then (j -> 0 ->> 'datos')::jsonb
+    else j end as filas from pegado)
 insert into public.ind_rental_data
        (serie,cliente,tipologia,modelo_negocio,anio,mes,mes_anio,moneda,
        importe_mensual,estado_serie,tipo_cambio,importe_pesos,created_at)
 select serie,cliente,tipologia,modelo_negocio,anio,mes,mes_anio,moneda,
        importe_mensual,estado_serie,tipo_cambio,importe_pesos,created_at
-  from jsonb_populate_recordset(null::public.ind_rental_data, $json$
-[]
-$json$::jsonb)
+  from datos, jsonb_populate_recordset(null::public.ind_rental_data, datos.filas)
  where (select count(*) from public.ind_rental_data) = 1500;   -- debe insertar 329
 
 
