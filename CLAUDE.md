@@ -147,6 +147,67 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
 
 ## Estado actual (features completadas)
 
+- **Indicadores** (menú Rental): la app de rental-dashboard, que vivía en otro
+  repo y se deployaba a Vercel, ahora es una vista nativa del CRM. Antes el menú
+  tenía un `<a>` que abría `rental-dashboard-xi.vercel.app` en otra pestaña, con
+  login propio (email+contraseña) contra **otro proyecto Supabase**
+  (`zziktktjsnkmtaqwghha`). Ahora entra con la sesión de Azure del CRM y lee del
+  Supabase del CRM.
+  - **Las 11 tablas llevan prefijo `ind_`** (`ind_rental_data`, `ind_stock_items`,
+    `ind_stock_movimientos`, `ind_stock_snapshots`, `ind_stock_cierres`,
+    `ind_ipc_data`, `ind_dtm_data`, `ind_facturacion_data`, `ind_clientes_data`,
+    `ind_chat_messages`, `ind_notifications`). El prefijo es para no confundir
+    `ind_clientes_data` (resumen mensual de rental) con `clientes` (los clientes
+    comerciales): son cosas distintas.
+  - **Todo el JS corre dentro de un IIFE** y lo único que expone es
+    `window.IND`, con los 25 handlers que el HTML necesita en sus `onclick`.
+    **Esto NO es cosmético:** la app define su propio `esc()` que escapa solo
+    comillas dobles, y el CRM tiene un `esc()` que escapa `& < > "` y se usa en
+    284 lugares. Pegado en el mismo scope, ganaba la última declaración y el CRM
+    quedaba con **XSS almacenado en esos 284 puntos**. Lo mismo con `doLogin`,
+    que habría reemplazado el login de Microsoft. **Nunca sacar el IIFE.**
+  - **Todo el CSS está scopeado bajo `#view-indicadores`** (7 clases chocaban:
+    `.badge .field .kpi-grid .kpi-label .kpi-sub .kpi-value .topbar`).
+  - **Bloque "Blindaje" al final de ese CSS:** el scope protege al CRM de
+    indicadores, pero no al revés. Reglas globales del CRM como `.topbar{}` o
+    `.badge::before{}` también matchean adentro del contenedor, y se filtraban
+    en las propiedades que la hoja de indicadores no declara (el `.badge::before`
+    del CRM le metía un punto decorativo a todos los badges). El blindaje las
+    devuelve al default con `revert`. **Si se agrega una clase nueva al CRM que
+    indicadores también use, hay que regenerarlo.**
+  - La vista tiene **contenedor propio, hermano de `#content`**, y `go()` alterna
+    cuál se ve. No se re-renderiza: así conserva gráficos y datos ya cargados al
+    cambiar de vista y volver.
+  - **Chart.js 4.4.1 se carga diferido**, recién al entrar a la vista por primera
+    vez, para no cobrarle 200 KB a quien nunca la abre.
+  - **Permisos: Indicadores NO usa los del CRM, y es a propósito.**
+    - *Ver el ítem del menú:* `comPuedeVer()` devuelve `true` para
+      `'indicadores'` con un early-return. Es una sección que se agregó
+      **después** de que se configuraran los permisos del equipo, así que no
+      figura en el array `ver` de nadie y el menú la habría ocultado para
+      todos. Exceptuarla evita reescribir los permisos ya cargados de cada
+      persona. No cambia nada para las secciones que ya existían, y leer no es
+      un riesgo porque el RLS de las tablas `ind_` ya deja leer a todo el
+      sector.
+    - *Cargar datos (el tab "Datos", que borra tablas enteras):* lo decide la
+      tabla **`ind_editores`** (mail + nota), no `perfiles_sector`. La primera
+      versión leía `perfiles_sector.permisos`, pero eso obligaba a **escribir**
+      en una tabla del CRM para dar de alta a alguien. Se descartó: los
+      permisos del CRM no se tocan. Alta y baja son un insert/delete en
+      `ind_editores`.
+    - `ind_editores` tiene **RLS activo y cero políticas**, y los grants
+      revocados a `anon` y `authenticated`: nadie la lee ni la escribe desde la
+      app. `ind_puede_editar()` la lee igual porque es `security definer`. Sin
+      esto, cualquiera se daría permiso a sí mismo para borrar el histórico.
+    - La interfaz pregunta por `sb.rpc('ind_puede_editar')`, **la misma función
+      que usa el RLS**, así que el botón y la base nunca pueden discrepar. Si
+      el RPC falla, el tab queda oculto (falla cerrado).
+    - Dirección **no** tiene permiso automático de carga: si se quiere, se
+      agrega el mail a `ind_editores`.
+  - Se perdió el login biométrico propio (WebAuthn): ahora lo maneja Microsoft.
+  - **Pendiente:** migrar los datos del proyecto viejo. Hasta que eso pase, la
+    vista se ve vacía. El proyecto `zziktktjsnkmtaqwghha` y el deploy de Vercel
+    siguen intactos como respaldo.
 - **Agenda** (menú Comercial): vista de lista y calendario mensual que unifica
   vencimientos. Junta cuatro fuentes: tareas propias (tabla `agenda_tareas`,
   se cargan a mano desde el botón o clickeando un día), próximo paso y fecha
