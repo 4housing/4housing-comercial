@@ -205,9 +205,24 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
     - Dirección **no** tiene permiso automático de carga: si se quiere, se
       agrega el mail a `ind_editores`.
   - Se perdió el login biométrico propio (WebAuthn): ahora lo maneja Microsoft.
-  - **Pendiente:** migrar los datos del proyecto viejo. Hasta que eso pase, la
-    vista se ve vacía. El proyecto `zziktktjsnkmtaqwghha` y el deploy de Vercel
-    siguen intactos como respaldo.
+  - **Datos migrados el 3/11/2026**: 2.733 filas en 9 tablas, verificadas una
+    por una contra el origen. `ind_stock_cierres` e `ind_stock_snapshots`
+    quedaron vacías porque nunca se había podido cerrar un mes: `cerrarMes()`
+    guarda primero la foto en snapshots y recién después escribe el cierre, y
+    esa tabla se había creado por error en OTRO proyecto Supabase (el de una
+    app de plantas), así que la función siempre cortó en el primer paso. La
+    migración lo deja arreglado y los cierres empiezan a funcionar.
+  - **LA CARGA DE DATOS VA SOLO POR EL CRM.** El deploy de Vercel y el proyecto
+    `zziktktjsnkmtaqwghha` quedan como respaldo **al menos hasta diciembre de
+    2026** (decisión de Ignacio: un mes de convivencia antes de dar de baja
+    nada). Pero son una **foto congelada al 3/11/2026**, no un espejo: si
+    alguien sube el Excel por la app de Vercel, esos datos entran en el proyecto
+    viejo, el CRM no se entera, y los indicadores del CRM parecen
+    "desactualizados" sin ninguna señal de error. Es la confusión más probable
+    de este período y no deja rastro en ningún log.
+  - Un proyecto de Supabase vivo **no es un backup**: depende de la cuenta y los
+    proyectos gratuitos se pausan por inactividad (de ahí la tabla `heartbeat`
+    que tiene el proyecto viejo). El respaldo de verdad es el export en CSV.
 - **Agenda** (menú Comercial): vista de lista y calendario mensual que unifica
   vencimientos. Junta cuatro fuentes: tareas propias (tabla `agenda_tareas`,
   se cargan a mano desde el botón o clickeando un día), próximo paso y fecha
