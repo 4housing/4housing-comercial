@@ -351,26 +351,37 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
 
 - `COD_GVA23` de Victoria López Aybar en Tango: falta dar de alta como vendedora.
 - Config `lista_precios_dolar_billete`: falta completar el número de lista de Tango.
-- **Diferencias abiertas en la liquidación del técnico de reefers** (salieron de
-  cruzar el Excel histórico contra la base, 4/11/2026). Ninguna se corrigió:
-  son decisiones comerciales, no bugs del código.
-  - **5 series que la planilla factura y que no existen en `ind_rental_data`**:
-    `CRLU 110562-4`, `FSCU 560476-4`, `SCXU 492781-3`, `SUDU 475338-3`,
-    `TOLU 780207-8`. 150 días por mes = 600 USD. Falta confirmar si salieron de
-    la flota o si es un error de clasificación en Tango.
-  - **3 que la planilla factura y la base tiene en stock**: `CRLU 726949-8`,
-    `SUDU 475651-0`, `ZCSU 511065-4`. En septiembre 2026 cobran mes completo,
-    y ese mes no tuvo ningún tramo parcial.
-  - **4 alquiladas a las que la planilla no les puso días**: `CCLU 859877-6`,
-    `CCLU 860139-7`, `CXRU 118045-3`, `SUDU 475293-6`.
+- **Diferencias entre el Excel del técnico de reefers y la base** (salieron de
+  cruzar las 33 hojas contra producción, 4/11/2026). El código no necesita
+  cambios: el botón ya las resuelve todas. Lo que queda son decisiones
+  comerciales.
+  - **RESUELTO — 5 series que la planilla factura y no existen en
+    `ind_rental_data`** (confirmado por Ignacio, 4/11/2026):
+    - `FSCU 560476-4`, `SUDU 475338-3`, `CRLU 110562-4` → **vendidos**.
+    - `SCXU 492781-3` → era **subalquilado y se devolvió a sus dueños**.
+    - `TOLU 780207-8` → **la serie está mal escrita**. La correcta es
+      `TOLU 780208-3`. Pero no está escrita *en lugar* de la correcta: está
+      *además*. Las dos facturan en paralelo los 33 meses, con los mismos días
+      — **1.004 días duplicados = 3.833 USD** (calculado con 3,5 USD/día en
+      2024 y 4 desde 2025). El botón factura solo la correcta.
+    Ninguno de los cinco debe facturar, y el botón ya los excluye porque no
+    están en `ind_rental_data`.
+  - **ABIERTO — 3 que la planilla factura y la base tiene en stock**:
+    `CRLU 726949-8`, `SUDU 475651-0`, `ZCSU 511065-4`. En septiembre 2026
+    cobran mes completo, y ese mes no tuvo ningún tramo parcial.
+  - **ABIERTO — 4 alquiladas a las que la planilla no les puso días**:
+    `CCLU 859877-6`, `CCLU 860139-7`, `CXRU 118045-3`, `SUDU 475293-6`.
   - **`ZCSU 511065-4` está duplicada en 15 hojas seguidas** (07-2025 a 09-2026):
     455 días de más, 1.820 USD. El botón la cuenta una sola vez.
+    **Son dos duplicados distintos, no uno**: con el de TOLU suman 5.653 USD.
   - **Julio 2025 se pagó de menos**: la fórmula del total de esa hoja arranca en
     `F11` en vez de `F4` y se comió el bloque de 20 pies. 93 días = 372 USD
     (al TC 1375 de esa hoja, ARS 511.500). Es la única hoja de 33 con el rango
     mal.
-  - En conjunto, para septiembre 2026 el botón da **150 días menos** que la
-    planilla: 1.560 contra 1.710 (600 USD, ARS 930.000 al TC 1550).
+  - **Conciliación de septiembre 2026, exacta**: planilla 57 filas (1.710 días);
+    −3 vendidos, −1 devuelto, −1 serie mal escrita, −1 fila repetida,
+    −3 que la base tiene en stock, +4 alquilados sin días = **52 contenedores,
+    1.560 días**, que es justo lo que da el botón.
 - **Pedido draft UI** dentro de cada cobranza — próximo paso grande, requiere
   tocar el `index.html` actual completo.
 - Push de pedidos a Tango vía API (`POST Api/Create/{process}`) una vez exista
