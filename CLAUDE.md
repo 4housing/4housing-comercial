@@ -269,6 +269,18 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
     vez. Por eso la tabla **`ind_liquidacion_repcont`** guarda el TC usado con
     su **fecha y su fuente**, más el detalle por serie. El Excel histórico no
     guardaba nada de eso: el TC era un número pelado tipeado en una celda.
+  - **Los 33 meses ya liquidados se cargaron de entrada**
+    (`sql/2026-11-04-repcont-historial.sql`): sin eso la hoja HISTORIAL del
+    primer archivo generado salía con una sola fila. Registra **lo que se
+    pagó**, no lo que correspondía — incluidos los meses con equipos ya
+    vendidos, la serie duplicada y el total mal sumado de julio 2025. El
+    historial es el registro de lo que pasó; corregirlo ahí taparía justo lo
+    que hay que reclamar. `tc_fecha` queda en NULL a propósito: la planilla
+    nunca anotó a qué día correspondía la cotización. Va con
+    `on conflict (mes_anio) do nothing`, así nunca pisa una liquidación hecha
+    desde el botón, y el rollback borra solo lo cargado
+    (`generado_por = 'carga histórica'`). Total del período:
+    **USD 227.997 / $ 280.393.660** en 33 meses.
   - El archivo lleva dos hojas: la del mes (misma estructura que el histórico,
     con **CLIENTE en G y NOTAS en H** — a la derecha de F, para no tocar las
     fórmulas del pie, que referencian E y F) y **HISTORIAL**, que se arma desde
