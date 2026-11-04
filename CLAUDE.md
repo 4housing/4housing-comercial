@@ -369,18 +369,17 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
     | `CRLU 110562-4` | 02/01/2025 | 01/2025 | 21 | 638 | 2.552 |
     | | | | | **3.556** | **14.041** |
 
-    El `SCXU` salió **antes de que empezara la planilla** y se facturó los 33
-    meses enteros. Si las fechas están en formato `mm/dd` el total baja a
-    13.545 USD.
+    Las fechas son `dd/mm/aaaa`, confirmado por Ignacio. El `SCXU` salió
+    **antes de que empezara la planilla** y se facturó los 33 meses enteros.
 
-    **PENDIENTE de confirmar — `TOLU 780207-8`.** Ignacio dijo primero que la
-    serie estaba mal escrita y que la correcta es `TOLU 780208-3`, pero después
-    pasó una planilla de ventas que la lista como contenedor vendido con fecha
-    propia. Las dos cosas no pueden ser: o es un tipeo, o es un equipo que se
-    vendió. (La hipótesis de que duplicaba a `780208-3` se apoyaba en que las
-    dos facturan los mismos días todos los meses, pero eso **no prueba nada**:
+    **`TOLU 780207-8` y `TOLU 780208-3` son dos contenedores distintos**, no
+    una serie mal escrita: el `780208-3` sigue alquilado a BAMBOO y factura
+    bien; el `780207-8` se vendió el 2/1/2025 y siguió facturando 21 meses.
+    Durante el análisis se había planteado que uno duplicaba al otro porque las
+    dos facturan los mismos días todos los meses — **eso no prueba nada**:
     44 de las 74 series del archivo hacen lo mismo porque están alquiladas de
-    forma continua.) El tratamiento del botón es idéntico en los dos casos.
+    forma continua. Vale como recordatorio de que en esta flota la continuidad
+    es la norma, no una anomalía.
   - **ABIERTO — 3 que la planilla factura y la base tiene en stock**:
     `CRLU 726949-8`, `SUDU 475651-0`, `ZCSU 511065-4`. En septiembre 2026
     cobran mes completo, y ese mes no tuvo ningún tramo parcial.
