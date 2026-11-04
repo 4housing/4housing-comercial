@@ -7415,7 +7415,7 @@ const sb = sbClient;
 // Sube de a uno en cada publicación, igual que el caché del service worker.
 // Se muestra abajo de todo en Datos para poder confirmar qué versión se está
 // viendo sin tener que adivinar si el navegador quedó con una copia vieja.
-const APP_VER=32;
+const APP_VER=33;
 
 const DTM_SEED=[
   {mes:'2026-01',serie:'FSCU 402701-4',modelo:'NQ MODULOS',tipo:'DTM',desc:'Reparación cerradura e instalación termotanque',costo:764099.0,fact:648000.0},
@@ -10180,13 +10180,168 @@ function rcArmarHoja(c, usdDia, tc, fuente, tcFecha){
   };
 }
 
+// ── Generación del archivo ─────────────────────────────────────────────────
+// Los estilos del Excel que el técnico viene recibiendo, sacados celda por
+// celda de la hoja 09-2026 del histórico. Los colores del original están como
+// índices de la paleta vieja de Excel; acá van resueltos a ARGB.
+const RC_EST = {
+  fuente:  'Arial', tam: 10,
+  ciruela: 'FF993366',   // encabezado
+  navy:    'FF000080',   // banda REEFER
+  plata:   'FFC0C0C0',   // banda 20 PIES
+  gris:    'FFBFBFBF',   // banda 40 PIES HC (theme0 tint -0.25)
+  blanco:  'FFFFFFFF',
+  rojo:    'FFFF0000',   // el total en USD va en rojo, es el detalle que más se nota
+  anchos:  [15.66, 7.55, 13.22, 10.89, 12.11, 15.55, 28, 30]
+};
+
+// ExcelJS se baja recién al apretar el botón, igual que Chart.js. El chequeo
+// de que la global quedó definida NO es paranoia: un CDN puede responder 200
+// con cuerpo vacío y entonces el error aparece varias líneas después sin decir
+// qué pasó.
+function cargarExcelJS(){
+  if(window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if(cargarExcelJS._p) return cargarExcelJS._p;
+  return (cargarExcelJS._p = new Promise((ok, fallo)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+    s.onload = ()=> window.ExcelJS ? ok(window.ExcelJS)
+                                   : fallo(new Error('ExcelJS cargó vacío'));
+    s.onerror = ()=> fallo(new Error('No se pudo cargar ExcelJS'));
+    document.head.appendChild(s);
+  }));
+}
+
 async function rcExcel(c, usdDia, tc, fuente, tcFecha){
+  const H = rcArmarHoja(c, usdDia, tc, fuente, tcFecha);
+  const hist = rcFilasHistorial(c, usdDia, tc, fuente, tcFecha);
+  const nombre = 'LIQUIDACION REPCONT ' + c.mes + '.xlsx';
+  // Con formato si se puede; si ExcelJS no carga, sale igual sin colores.
+  // El archivo es lo que hay que entregar: no tenerlo es peor que tenerlo feo.
+  try{
+    const ExcelJS = await cargarExcelJS();
+    await rcExcelConEstilo(ExcelJS, H, hist, nombre);
+    return;
+  }catch(e){
+    console.error('ExcelJS no disponible, se genera sin formato:', e);
+    try{ toast('No se pudo cargar la librería de formato: el Excel sale sin colores.'); }catch(_){}
+  }
+  await rcExcelPlano(H, hist, nombre);
+}
+
+// ── Camino con formato (ExcelJS) ───────────────────────────────────────────
+async function rcExcelConEstilo(ExcelJS, H, hist, nombre){
+  const E = RC_EST;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(H.hoja);
+  ws.columns = E.anchos.map(w=>({width:w}));
+
+  H.AOA.forEach(fila => ws.addRow(fila));
+
+  const base = {name:E.fuente, size:E.tam};
+  const banda = (r, argb)=>{
+    for(let col=1; col<=6; col++){
+      const x = ws.getCell(r, col);
+      x.fill = {type:'pattern', pattern:'solid', fgColor:{argb:argb}};
+      x.font = Object.assign({}, base, {bold:true, color:{argb:E.blanco}});
+      x.alignment = {horizontal: col===1 ? 'left' : 'center'};
+    }
+  };
+  banda(1, E.ciruela);                     // encabezado
+  banda(2, E.navy);                        // REEFER
+  banda(3, E.plata);                       // 20 PIES
+  // La banda de 40 pies no está en una fila fija: depende de cuántos 20 pies
+  // haya ese mes. Se busca por su texto.
+  for(let r=4; r<=H.ultFila; r++){
+    if(String(ws.getCell(r,1).value||'').trim()==='40 PIES HC'){ banda(r, E.gris); break; }
+  }
+  // Las dos columnas nuevas van fuera de la banda, como en el histórico, que
+  // solo pinta hasta F.
+  ['G1','H1'].forEach(ref=>{ ws.getCell(ref).font = Object.assign({}, base, {bold:true}); });
+
+  // Filas de datos
+  for(let r=4; r<=H.ultFila; r++){
+    for(let col=1; col<=8; col++){
+      const x = ws.getCell(r, col);
+      if(!x.font || !x.font.bold) x.font = Object.assign({}, base);
+      if(col===2 || col===3) x.alignment = {horizontal:'center'};
+      else if(col===4 || col===5){ if(typeof x.value==='number') x.numFmt = 'dd/mm/yyyy'; }
+      else if(col===6){ x.numFmt = '0'; x.alignment = {horizontal:'center', vertical:'top'}; }
+    }
+  }
+
+  // El pie: las fórmulas con su valor cacheado y el recuadro de Dias/Pesos.
+  const fino = {style:'thin'};
+  const caja = {top:fino, left:fino, bottom:fino, right:fino};
+  H.celdas.forEach(par=>{
+    const x = ws.getCell(par[0]), v = par[1];
+    x.value = v.f ? {formula:v.f, result:v.v} : v.v;
+    if(v.z) x.numFmt = v.z;
+    x.font = Object.assign({}, base);
+    if(v.t === 'n') x.alignment = {horizontal:'center', vertical:'top'};
+  });
+  ['E'+H.rDias, 'F'+H.rDias, 'E'+H.rUsd, 'F'+H.rUsd].forEach(ref=>{
+    ws.getCell(ref).border = caja;
+  });
+  // El total en USD va en rojo, como en el histórico.
+  ws.getCell('F'+H.rUsd).font = Object.assign({}, base, {color:{argb:E.rojo}});
+  ws.getCell('D'+H.rPesos).font = Object.assign({}, base);
+
+  const wh = wb.addWorksheet('HISTORIAL');
+  const hAOA = rcHistorialAOA(hist);
+  wh.columns = [9,18,14,10,8,9,12,10,11,26,16,30,12].map(w=>({width:w}));
+  hAOA.forEach(f => wh.addRow(f));
+  for(let col=1; col<=13; col++){
+    const x = wh.getCell(1, col);
+    x.font = Object.assign({}, base, {bold:true, color:{argb:E.blanco}});
+    x.fill = {type:'pattern', pattern:'solid', fgColor:{argb:E.ciruela}};
+    x.alignment = {horizontal:'center'};
+  }
+  for(let r=2; r<=hAOA.length; r++){
+    for(let col=1; col<=13; col++) wh.getCell(r,col).font = Object.assign({}, base);
+    wh.getCell(r,7).numFmt  = '[$USD]\\ #,##0';
+    wh.getCell(r,11).numFmt = '$#,##0.00';
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  rcDescargar(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), nombre);
+}
+
+function rcDescargar(blob, nombre){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+}
+
+// Las filas del historial, que las dos vías comparten.
+function rcFilasHistorial(c, usdDia, tc, fuente, tcFecha){
+  const previas = RC_LIQS.filter(l=> l.mes_anio !== c.mes);
+  return previas.concat([{
+    mes_anio:c.mes, dias:c.dias, contenedores:c.contenedores, listados:c.listados,
+    usd_dia:usdDia, total_usd:c.dias*usdDia, tc:tc, tc_fecha:tcFecha,
+    tc_fuente:fuente, total_pesos:c.dias*usdDia*tc,
+    generado_por:(currentUser && currentUser.email)||'', generado_en:new Date().toISOString()
+  }]).sort((a,b)=> String(a.mes_anio).localeCompare(String(b.mes_anio)));
+}
+function rcHistorialAOA(hist){
+  const a = [['MES','PERIODO','CONTENEDORES','LISTADOS','DIAS','USD/DIA',
+              'TOTAL USD','TC','FECHA TC','FUENTE TC','TOTAL PESOS','GENERADO POR','GENERADO']];
+  hist.forEach(l=> a.push([
+    l.mes_anio, rcNombreMes(l.mes_anio), Number(l.contenedores)||0, Number(l.listados)||0,
+    Number(l.dias)||0, Number(l.usd_dia)||0, Number(l.total_usd)||0, Number(l.tc)||0,
+    l.tc_fecha ? fechaCorta(l.tc_fecha) : '', l.tc_fuente||'', Number(l.total_pesos)||0,
+    l.generado_por||'', l.generado_en ? fechaCorta(l.generado_en) : '']));
+  return a;
+}
+// ── Camino sin formato (SheetJS), de respaldo ──────────────────────────────
+async function rcExcelPlano(H, hist, nombre){
   // SheetJS ya viene cargado global en el <head>; el import del CDN queda de
   // respaldo. El chequeo de que trajo algo NO es paranoia: un CDN puede
   // responder 200 con cuerpo vacío (proxy, bloqueo corporativo, caché
   // envenenada), y entonces XLSX.utils es undefined y el error aparece varias
-  // líneas después sin decir qué pasó. Es la misma trampa que cargarChartJs()
-  // ya contempla para Chart.js.
+  // líneas después sin decir qué pasó.
   let XLSX = (typeof window!=='undefined' && window.XLSX) ? window.XLSX : null;
   if(!(XLSX && XLSX.utils && XLSX.writeFile)){
     try{ XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs'); }
@@ -10194,7 +10349,6 @@ async function rcExcel(c, usdDia, tc, fuente, tcFecha){
   }
   if(!(XLSX && XLSX.utils && XLSX.writeFile))
     throw new Error('La librería de Excel cargó vacía. Revisá la conexión y volvé a intentar.');
-  const H = rcArmarHoja(c, usdDia, tc, fuente, tcFecha);
   const AOA = H.AOA, ultFila = H.ultFila, rPesos = H.rPesos;
 
   const ws = XLSX.utils.aoa_to_sheet(AOA, {cellDates:true});
@@ -10224,23 +10378,9 @@ async function rcExcel(c, usdDia, tc, fuente, tcFecha){
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, H.hoja);
 
-  // Hoja HISTORIAL: una fila por liquidación emitida. Se arma desde la tabla,
-  // así el archivo que se manda lleva el acumulado aunque se genere de cero.
-  const previas = RC_LIQS.filter(l=> l.mes_anio !== c.mes);
-  const hist = previas.concat([{
-    mes_anio:c.mes, dias:c.dias, contenedores:c.contenedores, listados:c.listados,
-    usd_dia:usdDia, total_usd:c.dias*usdDia, tc:tc, tc_fecha:tcFecha,
-    tc_fuente:fuente, total_pesos:c.dias*usdDia*tc,
-    generado_por:(currentUser && currentUser.email)||'', generado_en:new Date().toISOString()
-  }]).sort((a,b)=> String(a.mes_anio).localeCompare(String(b.mes_anio)));
-
-  const hAOA = [['MES','PERIODO','CONTENEDORES','LISTADOS','DIAS','USD/DIA',
-                 'TOTAL USD','TC','FECHA TC','FUENTE TC','TOTAL PESOS','GENERADO POR','GENERADO']];
-  hist.forEach(l=> hAOA.push([
-    l.mes_anio, rcNombreMes(l.mes_anio), Number(l.contenedores)||0, Number(l.listados)||0,
-    Number(l.dias)||0, Number(l.usd_dia)||0, Number(l.total_usd)||0, Number(l.tc)||0,
-    l.tc_fecha ? fechaCorta(l.tc_fecha) : '', l.tc_fuente||'', Number(l.total_pesos)||0,
-    l.generado_por||'', l.generado_en ? fechaCorta(l.generado_en) : '']));
+  // Hoja HISTORIAL: una fila por liquidación emitida. Las filas las arma
+  // rcFilasHistorial(), compartida con el camino con formato.
+  const hAOA = rcHistorialAOA(hist);
   const ws2 = XLSX.utils.aoa_to_sheet(hAOA);
   ws2['!cols'] = [{wch:9},{wch:18},{wch:14},{wch:10},{wch:8},{wch:9},{wch:12},
                   {wch:10},{wch:11},{wch:26},{wch:16},{wch:30},{wch:12}];
@@ -10250,7 +10390,7 @@ async function rcExcel(c, usdDia, tc, fuente, tcFecha){
   }
   XLSX.utils.book_append_sheet(wb, ws2, 'HISTORIAL');
 
-  XLSX.writeFile(wb, 'LIQUIDACION REPCONT ' + c.mes + '.xlsx');
+  XLSX.writeFile(wb, nombre);
 }
 
 
