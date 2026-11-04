@@ -356,32 +356,51 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
   cambios: el botón ya las resuelve todas. Lo que queda son decisiones
   comerciales.
   - **RESUELTO — 5 series que la planilla factura y no existen en
-    `ind_rental_data`** (confirmado por Ignacio, 4/11/2026):
-    - `FSCU 560476-4`, `SUDU 475338-3`, `CRLU 110562-4` → **vendidos**.
-    - `SCXU 492781-3` → era **subalquilado y se devolvió a sus dueños**.
-    - `TOLU 780207-8` → **la serie está mal escrita**. La correcta es
-      `TOLU 780208-3`. Pero no está escrita *en lugar* de la correcta: está
-      *además*. Las dos facturan en paralelo los 33 meses, con los mismos días
-      — **1.004 días duplicados = 3.833 USD** (calculado con 3,5 USD/día en
-      2024 y 4 desde 2025). El botón factura solo la correcta.
-    Ninguno de los cinco debe facturar, y el botón ya los excluye porque no
-    están en `ind_rental_data`.
+    `ind_rental_data`** (confirmado por Ignacio, 4/11/2026). Ninguna debe
+    facturar, y el botón ya las excluye porque no están en `ind_rental_data`.
+    Siguieron facturando hasta septiembre 2026 con estas fechas de salida:
+
+    | serie | salió | facturó desde | meses | días | USD |
+    |---|---|---|---:|---:|---:|
+    | `SCXU 492781-3` | 01/09/2023 (subalquiler devuelto) | 01/2024 | 33 | 1.004 | 3.833 |
+    | `TOLU 780207-8` | 02/01/2025 | 01/2025 | 21 | 638 | 2.552 |
+    | `FSCU 560476-4` | 02/01/2025 | 01/2025 | 21 | 638 | 2.552 |
+    | `SUDU 475338-3` | 02/01/2025 | 01/2025 | 21 | 638 | 2.552 |
+    | `CRLU 110562-4` | 02/01/2025 | 01/2025 | 21 | 638 | 2.552 |
+    | | | | | **3.556** | **14.041** |
+
+    El `SCXU` salió **antes de que empezara la planilla** y se facturó los 33
+    meses enteros. Si las fechas están en formato `mm/dd` el total baja a
+    13.545 USD.
+
+    **PENDIENTE de confirmar — `TOLU 780207-8`.** Ignacio dijo primero que la
+    serie estaba mal escrita y que la correcta es `TOLU 780208-3`, pero después
+    pasó una planilla de ventas que la lista como contenedor vendido con fecha
+    propia. Las dos cosas no pueden ser: o es un tipeo, o es un equipo que se
+    vendió. (La hipótesis de que duplicaba a `780208-3` se apoyaba en que las
+    dos facturan los mismos días todos los meses, pero eso **no prueba nada**:
+    44 de las 74 series del archivo hacen lo mismo porque están alquiladas de
+    forma continua.) El tratamiento del botón es idéntico en los dos casos.
   - **ABIERTO — 3 que la planilla factura y la base tiene en stock**:
     `CRLU 726949-8`, `SUDU 475651-0`, `ZCSU 511065-4`. En septiembre 2026
     cobran mes completo, y ese mes no tuvo ningún tramo parcial.
   - **ABIERTO — 4 alquiladas a las que la planilla no les puso días**:
     `CCLU 859877-6`, `CCLU 860139-7`, `CXRU 118045-3`, `SUDU 475293-6`.
   - **`ZCSU 511065-4` está duplicada en 15 hojas seguidas** (07-2025 a 09-2026):
-    455 días de más, 1.820 USD. El botón la cuenta una sola vez.
-    **Son dos duplicados distintos, no uno**: con el de TOLU suman 5.653 USD.
+    455 días de más, 1.820 USD. El botón la cuenta una sola vez. Este sí es un
+    duplicado confirmado: la misma serie aparece dos veces en la misma hoja.
   - **Julio 2025 se pagó de menos**: la fórmula del total de esa hoja arranca en
     `F11` en vez de `F4` y se comió el bloque de 20 pies. 93 días = 372 USD
     (al TC 1375 de esa hoja, ARS 511.500). Es la única hoja de 33 con el rango
     mal.
   - **Conciliación de septiembre 2026, exacta**: planilla 57 filas (1.710 días);
-    −3 vendidos, −1 devuelto, −1 serie mal escrita, −1 fila repetida,
-    −3 que la base tiene en stock, +4 alquilados sin días = **52 contenedores,
-    1.560 días**, que es justo lo que da el botón.
+    −5 fuera de la flota, −1 fila repetida, −3 que la base tiene en stock,
+    +4 alquilados sin días = **52 contenedores, 1.560 días**, que es justo lo
+    que da el botón.
+  - **Acumulado**: 14.041 USD facturados después de la salida + 1.820 del
+    duplicado de ZCSU − 372 que se pagaron de menos en julio 2025 =
+    **15.489 USD de más**, sin contar los 3 en stock ni los 4 sin días, que
+    siguen abiertos.
 - **Pedido draft UI** dentro de cada cobranza — próximo paso grande, requiere
   tocar el `index.html` actual completo.
 - Push de pedidos a Tango vía API (`POST Api/Create/{process}`) una vez exista
