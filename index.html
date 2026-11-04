@@ -682,6 +682,9 @@ textarea.inp{resize:vertical;min-height:60px;}
 #view-indicadores #rc-totales div{display:flex;flex-direction:column;gap:2px}
 #view-indicadores #rc-totales span{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--gray-500)}
 #view-indicadores #rc-totales b{font-size:16px;color:var(--gray-800)}
+#view-indicadores .rc-hist{padding:7px 20px;font-size:11px;color:var(--gray-500);
+  border-bottom:1px solid var(--gray-200);background:#fff}
+#view-indicadores .rc-hist-mal{color:#a4332e;background:#fdeeed}
 #view-indicadores .rc-cuerpo{overflow:auto;padding:14px 20px;flex:1}
 #view-indicadores .rc-sub{font-size:11px;font-weight:600;color:var(--gray-600);margin:0 0 7px}
 #view-indicadores #rc-novedades{margin-bottom:16px;display:flex;flex-direction:column;gap:4px}
@@ -1161,6 +1164,7 @@ textarea.inp{resize:vertical;min-height:60px;}
         </div>
       </div>
       <div id="rc-totales"></div>
+      <div id="rc-hist" class="rc-hist">Leyendo el historial...</div>
       <div class="rc-cuerpo">
         <p class="rc-sub">Novedades contra el mes anterior</p>
         <div id="rc-novedades"></div>
@@ -9841,19 +9845,26 @@ async function rcCotizacion(){
 }
 
 // ── La UI ──────────────────────────────────────────────────────────────────
-let RC_CALC = null, RC_LIQS = [], RC_LIQS_OK = false, RC_GENERANDO = false;
+let RC_CALC = null, RC_LIQS = [], RC_LIQS_OK = false, RC_GENERANDO = false, RC_LIQS_ERROR = '';
 
 // Las liquidaciones ya emitidas, para el historial y para el recordatorio.
+//
+// El error NO se come: si la consulta falla, la hoja HISTORIAL saldría con una
+// sola fila y el archivo parecería correcto. Se guarda el motivo y el modal lo
+// muestra antes de generar, que es el único momento en que sirve verlo.
 async function rcCargarLiqs(){
+  RC_LIQS_ERROR = '';
   try{
     const r = await sb.from('ind_liquidacion_repcont').select('*').order('mes_anio',{ascending:false});
     if(r && r.error) throw r.error;
     RC_LIQS = (r && r.data) ? r.data : [];
     RC_LIQS_OK = true;
-  }catch(_){
-    // Si la tabla todavía no existe (falta correr el .sql), no se rompe nada:
-    // el botón sigue andando y lo único que falta es el aviso y el historial.
+  }catch(e){
+    // Puede ser que falte correr el .sql, que PostgREST todavía no vea la tabla,
+    // o que el RLS no deje leerla. El botón sigue andando igual.
     RC_LIQS = [];
+    RC_LIQS_OK = false;
+    RC_LIQS_ERROR = (e && (e.message || e.hint || e.code)) ? String(e.message || e.hint || e.code) : 'no se pudo leer';
   }
   return RC_LIQS;
 }
@@ -9900,6 +9911,33 @@ function repcontAbrir(){
   if(tar) tar.value = rcTarifa(sel ? sel.value : rcMesPorDefecto());
   repcontCambiarMes();
   rcBuscarTC();
+  // El historial se relee cada vez que se abre, y se ESPERA: rcToggle() lo
+  // dispara sin esperarlo, así que abrir y generar rápido podría armar el
+  // Excel antes de que llegue. Son unas pocas decenas de filas.
+  rcCargarLiqs().then(()=>{ rcPintarHistorial(); rcActualizarAviso(); })
+                .catch(()=>rcPintarHistorial());
+}
+
+// Cuántas liquidaciones anteriores van a entrar en la hoja HISTORIAL, o por
+// qué no hay ninguna. Se muestra ANTES de generar: un historial vacío en el
+// archivo no se nota hasta que el técnico lo recibe.
+function rcPintarHistorial(){
+  const el = document.getElementById('rc-hist');
+  if(!el) return;
+  if(RC_LIQS_ERROR){
+    el.className = 'rc-hist rc-hist-mal';
+    el.textContent = 'No se pudo leer el historial (' + RC_LIQS_ERROR
+      + '). El Excel va a salir con esta liquidación sola.';
+    return;
+  }
+  if(!RC_LIQS_OK){ el.className='rc-hist'; el.textContent='Leyendo el historial...'; return; }
+  const n = RC_LIQS.length;
+  el.className = 'rc-hist';
+  el.textContent = n
+    ? ('Historial: ' + n + ' liquidación' + (n===1?'':'es') + ' anterior'
+       + (n===1?'':'es') + ' (' + RC_LIQS[RC_LIQS.length-1].mes_anio + ' a '
+       + RC_LIQS[0].mes_anio + ').')
+    : 'El historial está vacío: el Excel va a salir con esta liquidación sola.';
 }
 function repcontCerrar(){
   const m = document.getElementById('rc-modal');
