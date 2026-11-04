@@ -690,6 +690,11 @@ textarea.inp{resize:vertical;min-height:60px;}
 #view-indicadores .rc-nov-alta{border-left-color:#5f7a4e}
 #view-indicadores .rc-nov-baja{border-left-color:#d9534f}
 #view-indicadores .rc-nov-parcial,#view-indicadores .rc-nov-tramos{border-left-color:#d6a84f}
+#view-indicadores .rc-nov-falta{border-left-color:#d9534f;background:#fdeeed}
+/* El modal vive adentro de .app, asi que la regla de @media print del CRM
+   (que oculta todo hijo directo de <body> salvo .app) no lo alcanza. Si
+   alguien imprime con el modal abierto, saldria encima del informe. */
+@media print{ #view-indicadores #rc-modal{display:none !important} }
 #view-indicadores .rc-tabla{width:100%;border-collapse:collapse;font-size:11px}
 #view-indicadores .rc-tabla th{text-align:left;font-weight:600;color:var(--gray-500);
   border-bottom:1px solid var(--gray-200);padding:5px 7px;position:sticky;top:0;background:#fff}
@@ -9721,6 +9726,9 @@ function rcNovedades(mesAnio, filas){
     .map(r => String(r.serie||'').trim()));
 
   const ahora = new Set(filas.filter(f=>f.dias>0).map(f=>f.serie));
+  // Las series que figuran en el mes, facturen o no. No es lo mismo que una
+  // serie pasó a stock (aparece con 0 días) que haya desaparecido de los datos.
+  const listadas = new Set(filas.map(f=>f.serie));
   const out = [];
 
   // Sin datos del mes anterior no hay con qué comparar. Listar los 52 reefers
@@ -9734,8 +9742,30 @@ function rcNovedades(mesAnio, filas){
       out.push({tipo:'alta', serie:f.serie, detalle:'no facturaba en '+prev+
         (f.cliente?' · '+f.cliente:'')}));
 
-    antes.forEach(s=>{ if(!ahora.has(s))
-      out.push({tipo:'baja', serie:s, detalle:'facturaba en '+prev+' y este mes no'}); });
+    antes.forEach(s=>{
+      if(ahora.has(s)) return;
+      // Un reefer que facturaba y este mes NO TIENE NINGUNA FILA en
+      // ind_rental_data no es una baja: es un agujero en los datos. La
+      // liquidación lo omite sin dejar rastro, que es exactamente como el
+      // Excel histórico terminó con 5 series que cobraban y no existen en la
+      // base. Se separa de la baja normal porque se arregla distinto: la baja
+      // es un hecho comercial, esto es un dato que falta.
+      if(listadas.has(s)) out.push({tipo:'baja', serie:s,
+        detalle:'facturaba en '+prev+' y este mes está en stock'});
+      else out.push({tipo:'falta', serie:s,
+        detalle:'facturaba en '+prev+' y en '+mesAnio+' no tiene ninguna fila · '
+               +'revisá si salió de la flota o si falta el dato'});
+    });
+  }
+
+  // El cálculo de días barre ind_stock_movimientos, que se carga sin paginar.
+  // PostgREST corta en 1000 filas por defecto, y si eso pasa los movimientos
+  // más nuevos no llegan: los meses con alta o baja se liquidarían como mes
+  // completo, en silencio. Hoy son ~531 filas, pero la tabla solo crece.
+  if((typeof STOCK_MOVS!=='undefined' ? STOCK_MOVS.length : 0) >= 1000){
+    out.push({tipo:'falta', serie:'',
+      detalle:'el historial de movimientos llegó al tope de 1000 filas: los meses '
+             +'con alta o baja pueden estar saliendo como mes completo'});
   }
 
   filas.filter(f=>f.parcial).forEach(f=>
@@ -9749,19 +9779,30 @@ function rcNovedades(mesAnio, filas){
   return out;
 }
 
-// Meses con datos, del más nuevo al más viejo. El que viene seleccionado es el
-// último mes CERRADO: el mes en curso todavía no se liquida.
+function rcMesActual(){
+  const h = new Date();
+  return h.getFullYear() + '-' + String(h.getMonth()+1).padStart(2,'0');
+}
+
+// Meses CERRADOS con datos, del más nuevo al más viejo.
+//
+// El mes en curso se excluye, y no es un detalle: allData lo incluye (ver
+// mesesDeStock/recomponerDatos, que sintetizan las filas del mes abierto para
+// el "● En vivo" del tablero). Si se pudiera elegir, rcTramosDe lo liquidaría
+// como mes COMPLETO —sin movimientos cargados devuelve [{d:1,h:ultimo}]— y
+// encima `parcial` daría false porque dias==ultimo, así que ni el panel de
+// novedades avisaría. Un clic liquidaría días que todavía no pasaron, sobre
+// un documento de pago a un tercero, y el upsert por mes_anio dejaría asentada
+// esa fila falsa hasta que alguien regenere el mes de verdad.
 function rcMeses(){
   const datos = (typeof allData!=='undefined' ? allData : []);
+  const actual = rcMesActual();
   const s = new Set();
-  datos.forEach(r=>{ if(r && r.mes_anio) s.add(r.mes_anio); });
+  datos.forEach(r=>{ if(r && r.mes_anio && r.mes_anio < actual) s.add(r.mes_anio); });
   return Array.from(s).sort().reverse();
 }
 function rcMesPorDefecto(){
-  const hoy = new Date();
-  const actual = hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0');
-  const ms = rcMeses();
-  return ms.find(m => m < actual) || ms[0] || '';
+  return rcMeses()[0] || '';
 }
 
 // ── El tipo de cambio ──────────────────────────────────────────────────────
@@ -9800,7 +9841,7 @@ async function rcCotizacion(){
 }
 
 // ── La UI ──────────────────────────────────────────────────────────────────
-let RC_CALC = null, RC_LIQS = [], RC_LIQS_OK = false;
+let RC_CALC = null, RC_LIQS = [], RC_LIQS_OK = false, RC_GENERANDO = false;
 
 // Las liquidaciones ya emitidas, para el historial y para el recordatorio.
 async function rcCargarLiqs(){
@@ -9842,7 +9883,12 @@ function rcActualizarAviso(){
 
 function repcontAbrir(){
   const ms = rcMeses();
-  if(!ms.length){ try{ toast('No hay datos de rental cargados todavía.'); }catch(_){} return; }
+  if(!ms.length){
+    // Puede ser que no haya datos, o que el único mes con datos sea el que
+    // está en curso. En los dos casos no hay nada para liquidar todavía.
+    try{ toast('No hay ningún mes cerrado para liquidar. El mes en curso se liquida una vez terminado.'); }catch(_){}
+    return;
+  }
   const sel = document.getElementById('rc-mes');
   if(sel){
     sel.innerHTML = ms.map(m=>'<option value="'+rcEsc(m)+'">'+rcEsc(rcNombreMes(m))+'</option>').join('');
@@ -9918,7 +9964,7 @@ function rcPintarDetalle(){
   const nov = document.getElementById('rc-novedades');
   if(nov){
     const ET = {alta:'Alta', baja:'Baja', parcial:'Mes parcial',
-                tramos:'Varios tramos', aviso:'Sin comparación'};
+                tramos:'Varios tramos', aviso:'Sin comparación', falta:'Falta el dato'};
     const extra = c.panol.length
       ? '<div class="rc-nov-item"><b>Excluidos</b> · '+c.panol.length
         +' reefer-pañol, no computan para el técnico</div>' : '';
@@ -9926,7 +9972,7 @@ function rcPintarDetalle(){
     // Y se corta la lista: con 50 líneas nadie lee ninguna.
     // Ojo con el ||: orden.parcial es 0 y `0 || 9` da 9, que mandaba los
     // parciales (lo que más hay que revisar) al final de la lista.
-    const orden = {parcial:1, tramos:2, aviso:3, baja:4, alta:5};
+    const orden = {falta:1, parcial:2, tramos:3, aviso:4, baja:5, alta:6};
     const pos = n => orden[n.tipo] || 9;
     const lista = c.novedades.slice().sort((a,b)=> pos(a) - pos(b));
     const TOPE = 14;
@@ -9956,20 +10002,25 @@ function rcPintarTotales(){
     + '<div><span>USD</span><b>'+fmt(usd)+'</b></div>'
     + '<div><span>Pesos</span><b>'+(tc>0 ? '$ '+fmt(usd*tc) : '—')+'</b></div>';
   if(btn){
-    const ok = c.dias > 0 && usdDia > 0 && tc > 0;
+    // RC_GENERANDO: esta función corre con cada tecla en los campos de TC y
+    // tarifa. Sin el flag, tipear mientras se genera vuelve a habilitar el
+    // botón y sale un segundo Excel con otro número para el mismo mes.
+    const ok = c.dias > 0 && usdDia > 0 && tc > 0 && !RC_GENERANDO;
     btn.disabled = !ok;
-    btn.title = ok ? '' : 'Falta el tipo de cambio o la tarifa';
+    btn.title = RC_GENERANDO ? 'Generando...'
+              : (ok ? '' : 'Falta el tipo de cambio o la tarifa');
   }
 }
 
 async function repcontGenerar(){
   const c = RC_CALC;
-  if(!c) return;
+  if(!c || RC_GENERANDO) return;   // doble clic: una sola liquidación por vez
   const usdDia = Number((document.getElementById('rc-usd')||{}).value) || 0;
   const inpTC = document.getElementById('rc-tc');
   const tc = Number(inpTC ? inpTC.value : 0) || 0;
   if(!(c.dias>0 && usdDia>0 && tc>0)) return;
 
+  RC_GENERANDO = true;
   const btn = document.getElementById('rc-generar');
   const antes = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = 'Generando...'; }
@@ -10014,6 +10065,7 @@ async function repcontGenerar(){
     console.error(e);
     alert('No se pudo generar el Excel: ' + (e && e.message ? e.message : e));
   }finally{
+    RC_GENERANDO = false;
     if(btn){ btn.disabled = false; btn.textContent = antes; }
   }
 }
@@ -10028,7 +10080,16 @@ async function repcontGenerar(){
 // se mueve con la cantidad de contenedores del mes) y así se puede probar sola.
 function rcArmarHoja(c, usdDia, tc, fuente, tcFecha){
   const [anio, mes] = c.mes.split('-').map(Number);
-  const fechaCel = d => new Date(Date.UTC(anio, mes-1, d));
+  // El serial de Excel se escribe a mano: NUNCA pasar un objeto Date por
+  // SheetJS. Al escribir sin {cellDates:true}, datenum() interpreta la Date en
+  // hora LOCAL del navegador, y en Buenos Aires (UTC-3) el 01/09 a las 00:00Z
+  // se guarda como 31/08 20:59:12. La hoja entera sale corrida un día, con la
+  // columna DIAS contradiciéndola, y metiéndose en el mes anterior.
+  // `new Date(anio, mes-1, d)` tampoco sirve: datenum resta la diferencia de
+  // husos contra 1899-12-30, y para Buenos Aires ese offset es 256 min (CMT
+  // -4:16:48) contra 180 de hoy, así que queda en 23:59:12 del día anterior.
+  // 25569 = días entre la época de Excel (1899-12-30) y la de Unix.
+  const fechaCel = d => Date.UTC(anio, mes-1, d)/86400000 + 25569;
   const AOA = [];
 
   AOA.push(['', 'TIPO', 'ESTADO', 'DESDE', 'HASTA', 'DIAS', 'CLIENTE', 'NOTAS']);
@@ -10082,7 +10143,19 @@ function rcArmarHoja(c, usdDia, tc, fuente, tcFecha){
 }
 
 async function rcExcel(c, usdDia, tc, fuente, tcFecha){
-  const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
+  // SheetJS ya viene cargado global en el <head>; el import del CDN queda de
+  // respaldo. El chequeo de que trajo algo NO es paranoia: un CDN puede
+  // responder 200 con cuerpo vacío (proxy, bloqueo corporativo, caché
+  // envenenada), y entonces XLSX.utils es undefined y el error aparece varias
+  // líneas después sin decir qué pasó. Es la misma trampa que cargarChartJs()
+  // ya contempla para Chart.js.
+  let XLSX = (typeof window!=='undefined' && window.XLSX) ? window.XLSX : null;
+  if(!(XLSX && XLSX.utils && XLSX.writeFile)){
+    try{ XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs'); }
+    catch(e){ throw new Error('No se pudo cargar la librería de Excel: '+(e.message||e)); }
+  }
+  if(!(XLSX && XLSX.utils && XLSX.writeFile))
+    throw new Error('La librería de Excel cargó vacía. Revisá la conexión y volvé a intentar.');
   const H = rcArmarHoja(c, usdDia, tc, fuente, tcFecha);
   const AOA = H.AOA, ultFila = H.ultFila, rPesos = H.rPesos;
 
@@ -10097,8 +10170,11 @@ async function rcExcel(c, usdDia, tc, fuente, tcFecha){
     ws[par[0]] = Object.assign(ws[par[0]] || {t:'n'}, par[1]);
   });
 
+  // Las fechas ahora son seriales numéricos, así que se buscan como t==='n'.
+  // Las filas de banda y las de stock llevan '' en D/E, que SheetJS escribe
+  // como t==='s', así que este loop no las toca.
   for(let r=4; r<=ultFila; r++){
-    ['D','E'].forEach(col=>{ if(ws[col+r] && ws[col+r].t==='d') ws[col+r].z = 'dd/mm/yyyy'; });
+    ['D','E'].forEach(col=>{ if(ws[col+r] && ws[col+r].t==='n') ws[col+r].z = 'dd/mm/yyyy'; });
     if(ws['F'+r] && ws['F'+r].t==='n') ws['F'+r].z = '0';
   }
 

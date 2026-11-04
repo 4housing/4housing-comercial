@@ -277,6 +277,35 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
     la 79 y la 87 según el mes, y en **julio 2025 quedó mal escrita**
     (`=SUM(F11:F79)` en vez de `=SUM(F4:F79)`), lo que se comió las tres filas
     de 20 pies: **93 días = 372 USD que no se le pagaron al técnico**.
+  - **NUNCA pasar un objeto `Date` por SheetJS.** Al escribir sin
+    `{cellDates:true}`, `datenum()` interpreta la fecha en hora **local del
+    navegador**, así que en Buenos Aires (UTC-3) un `Date.UTC(2026,8,1)` se
+    guarda como **31/08/2026 20:59:12**: la hoja entera sale corrida un día, se
+    mete en el mes anterior y contradice la columna DIAS, sin ningún error.
+    `new Date(anio, mes-1, d)` tampoco sirve: `datenum` resta la diferencia de
+    husos contra 1899-12-30, y para Buenos Aires ese offset es **256 min**
+    (CMT −4:16:48) contra 180 de hoy, o sea 23:59:12 del día anterior. Se
+    escribe el **serial de Excel a mano**: `Date.UTC(a,m,d)/86400000 + 25569`.
+    Las celdas quedan `t==='n'`, no `t==='d'`, y el formato se aplica como tal.
+    **Un entorno de prueba en UTC no detecta esto**: hay que forzar el huso
+    (en Playwright, `timezoneId`).
+  - **El mes en curso no se puede elegir**, y hay que mantenerlo así: `allData`
+    lo incluye (`mesesDeStock`/`recomponerDatos` sintetizan las filas del mes
+    abierto para el "● En vivo"), y `rcTramosDe` sin movimientos devuelve el
+    **mes completo**. Elegirlo liquidaría días que todavía no pasaron, `parcial`
+    daría `false` porque `dias == último`, y el upsert por `mes_anio` dejaría
+    asentada esa fila hasta que alguien regenere el mes de verdad.
+  - **`ind_stock_movimientos` se carga sin paginar** (`index.html:8374`), y
+    PostgREST corta en 1000 filas. Hoy son ~531, pero la tabla solo crece: si
+    llega al tope, los meses con alta o baja se liquidarían como mes completo
+    en silencio. El modal avisa cuando `STOCK_MOVS.length >= 1000`. **El
+    arreglo de fondo es migrar esa carga a `SB._fetchAll()`**, que es el patrón
+    del proyecto, pero toca código compartido y no se hizo con esta feature.
+  - Si un reefer facturaba el mes anterior y este mes **no tiene ninguna fila**
+    en `ind_rental_data`, se marca como **"Falta el dato"**, distinto de una
+    baja: una baja es un hecho comercial, esto es un agujero en los datos. Es
+    exactamente como el Excel histórico terminó con 5 series que cobran y no
+    existen en la base.
   - El modal muestra un panel de **novedades** (altas, bajas, meses parciales,
     series con varios tramos, pañol excluidos). No corrige nada solo: lo pone
     adelante para que se revise antes de emitir.
