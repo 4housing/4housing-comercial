@@ -648,6 +648,63 @@ textarea.inp{resize:vertical;min-height:60px;}
 @keyframes ind-spin{to{transform:rotate(360deg)}}
 #view-indicadores .pb-14{padding-bottom:14px}
 
+
+/* Liquidación Repcont — el Excel mensual del técnico de reefers */
+#view-indicadores #rc-grupo{display:none;align-items:center;gap:6px}
+#view-indicadores #rc-btn{display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;
+  border:1px solid var(--gray-200);background:#fff;color:var(--gray-600);font-size:11px;font-weight:500;
+  cursor:pointer;position:relative;white-space:nowrap}
+#view-indicadores #rc-btn:hover{border-color:var(--green);color:var(--green)}
+#view-indicadores #rc-aviso{position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;
+  background:#d9534f;border:1.5px solid #fff}
+#view-indicadores #rc-modal{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:10000;
+  display:none;align-items:center;justify-content:center;padding:18px}
+#view-indicadores .rc-caja{background:#fff;border-radius:14px;width:min(960px,100%);max-height:92vh;
+  display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.26)}
+#view-indicadores .rc-top{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:16px 20px;border-bottom:1px solid var(--gray-200)}
+#view-indicadores .rc-top h3{margin:0;font-size:15px;font-weight:600;color:var(--gray-800)}
+#view-indicadores .rc-top p{margin:3px 0 0;font-size:11px;color:var(--gray-500)}
+#view-indicadores .rc-x{background:none;border:none;font-size:22px;line-height:1;cursor:pointer;
+  color:var(--gray-500);padding:0 4px}
+#view-indicadores .rc-campos{display:flex;flex-wrap:wrap;gap:14px;padding:14px 20px;
+  border-bottom:1px solid var(--gray-200);align-items:flex-end}
+#view-indicadores .rc-campo{display:flex;flex-direction:column;gap:4px}
+#view-indicadores .rc-campo label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--gray-500)}
+#view-indicadores .rc-campo input,#view-indicadores .rc-campo select{padding:6px 9px;border-radius:7px;
+  border:1px solid var(--gray-200);font-size:12px;font-family:inherit;color:var(--gray-800);background:#fff}
+#view-indicadores .rc-campo input[type=number]{width:120px;text-align:right}
+#view-indicadores #rc-tc-nota{font-size:10px;color:var(--gray-500);max-width:260px;line-height:1.35}
+#view-indicadores .rc-relink{background:none;border:none;padding:0;font-size:10px;color:var(--green);
+  cursor:pointer;text-decoration:underline}
+#view-indicadores #rc-totales{display:flex;gap:22px;flex-wrap:wrap;padding:12px 20px;
+  background:var(--cream,#f4f2ea);border-bottom:1px solid var(--gray-200)}
+#view-indicadores #rc-totales div{display:flex;flex-direction:column;gap:2px}
+#view-indicadores #rc-totales span{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--gray-500)}
+#view-indicadores #rc-totales b{font-size:16px;color:var(--gray-800)}
+#view-indicadores .rc-cuerpo{overflow:auto;padding:14px 20px;flex:1}
+#view-indicadores .rc-sub{font-size:11px;font-weight:600;color:var(--gray-600);margin:0 0 7px}
+#view-indicadores #rc-novedades{margin-bottom:16px;display:flex;flex-direction:column;gap:4px}
+#view-indicadores .rc-nov-item{font-size:11px;color:var(--gray-600);padding:5px 9px;border-radius:6px;
+  background:var(--gray-50,#fafafa);border-left:3px solid var(--gray-200)}
+#view-indicadores .rc-nov-alta{border-left-color:#5f7a4e}
+#view-indicadores .rc-nov-baja{border-left-color:#d9534f}
+#view-indicadores .rc-nov-parcial,#view-indicadores .rc-nov-tramos{border-left-color:#d6a84f}
+#view-indicadores .rc-tabla{width:100%;border-collapse:collapse;font-size:11px}
+#view-indicadores .rc-tabla th{text-align:left;font-weight:600;color:var(--gray-500);
+  border-bottom:1px solid var(--gray-200);padding:5px 7px;position:sticky;top:0;background:#fff}
+#view-indicadores .rc-tabla td{padding:4px 7px;border-bottom:1px solid var(--gray-100,#f1f1f1);
+  color:var(--gray-700);vertical-align:top;word-break:break-word}
+#view-indicadores .rc-tabla tr.rc-sin td{color:var(--gray-400,#aaa)}
+#view-indicadores .rc-tabla tr.rc-parcial td{background:#fdf8ec}
+#view-indicadores .rc-vacio{font-size:12px;color:var(--gray-500);padding:18px 0;text-align:center}
+#view-indicadores .rc-pie{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:13px 20px;border-top:1px solid var(--gray-200)}
+#view-indicadores .rc-nota-pie{font-size:10px;color:var(--gray-500);max-width:520px;line-height:1.4}
+#view-indicadores #rc-generar{padding:9px 18px;border-radius:8px;border:none;background:var(--green,#5f7a4e);
+  color:#fff;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+#view-indicadores #rc-generar[disabled]{opacity:.45;cursor:default}
+
 /* ---- Blindaje -------------------------------------------------
    Reglas GLOBALES del CRM (.topbar, .badge, ...) que tambien matchean
    adentro de este contenedor. Para las propiedades que la hoja de
@@ -829,6 +886,12 @@ textarea.inp{resize:vertical;min-height:60px;}
       <button class="chip" onclick="IND.setModelo('BA REEFERS',this)" data-filter="modelo">BA Reefers</button>
       <button class="chip" onclick="IND.setModelo('BA MODULOS',this)" data-filter="modelo">BA Módulos</button>
       <button class="chip" onclick="IND.setModelo('NQ MODULOS',this)" data-filter="modelo">NQ Módulos</button>
+    </div>
+    <div class="chip-group" id="rc-grupo">
+      <button id="rc-btn" onclick="IND.repcontAbrir()" title="Genera el Excel de la liquidación mensual del técnico de reefers">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Liquidación Repcont</span><span id="rc-aviso" style="display:none"></span>
+      </button>
     </div>
     <div class="chip-group" id="btn-mov-grupo" style="display:none;margin-left:auto">
       <button id="btn-mov" onclick="IND.toggleMovimientos()">
@@ -1063,7 +1126,49 @@ textarea.inp{resize:vertical;min-height:60px;}
       <div id="upload-history"></div>
       <!-- Para saber de un vistazo si el navegador ya tomó la versión nueva. -->
       <div id="app-ver" style="font-size:11px;color:var(--gray-400);margin-top:14px">
-</div></div></div></div></div>
+</div></div></div></div>
+  <!-- Liquidación Repcont: se arma al vuelo, el modal arranca vacío -->
+  <div id="rc-modal" onclick="if(event.target===this)IND.repcontCerrar()">
+    <div class="rc-caja">
+      <div class="rc-top">
+        <div>
+          <h3>Liquidación Repcont</h3>
+          <p>Se cobran los días que cada reefer estuvo alquilado. Los reefer-pañol no computan.</p>
+        </div>
+        <button class="rc-x" onclick="IND.repcontCerrar()" title="Cerrar">&times;</button>
+      </div>
+      <div class="rc-campos">
+        <div class="rc-campo">
+          <label for="rc-mes">Mes a liquidar</label>
+          <select id="rc-mes" onchange="IND.repcontCambiarMes()"></select>
+        </div>
+        <div class="rc-campo">
+          <label for="rc-usd">USD por día</label>
+          <input id="rc-usd" type="number" step="0.1" min="0" oninput="IND.repcontRecalcular()">
+        </div>
+        <div class="rc-campo">
+          <label for="rc-tc">Tipo de cambio</label>
+          <input id="rc-tc" type="number" step="0.01" min="0" oninput="IND.repcontRecalcular()">
+        </div>
+        <div class="rc-campo" style="flex:1;min-width:200px">
+          <span id="rc-tc-nota"></span>
+          <button class="rc-relink" onclick="IND.repcontBuscarTC()">volver a buscar la cotización</button>
+        </div>
+      </div>
+      <div id="rc-totales"></div>
+      <div class="rc-cuerpo">
+        <p class="rc-sub">Novedades contra el mes anterior</p>
+        <div id="rc-novedades"></div>
+        <p class="rc-sub">Detalle</p>
+        <div id="rc-detalle"></div>
+      </div>
+      <div class="rc-pie">
+        <span class="rc-nota-pie">El tipo de cambio es el del día en que bajás el informe. Queda guardado con su fecha y su fuente para que la liquidación se pueda reconstruir después.</span>
+        <button id="rc-generar" onclick="IND.repcontGenerar()">Generar Excel</button>
+      </div>
+    </div>
+  </div>
+</div>
   </div>
 </div>
 
@@ -7650,6 +7755,10 @@ function setModelo(v,el){
   curModelo=v;
   document.querySelectorAll('[data-filter="modelo"]').forEach(c=>c.classList.remove('active'));
   el.classList.add('active');renderAll();
+  // El tecnico cobra solo por los reefers, asi que el boton de liquidacion
+  // aparece unicamente con BA REEFERS elegido. Lo demas de esta funcion no
+  // cambia: el try/catch es para que un error aca nunca rompa el filtro.
+  try{ rcToggle(); }catch(_){}
 }
 
 function renderAll(){
@@ -9388,6 +9497,649 @@ function toggleDetalle(key) {
 
 
 // Unico punto de contacto con el resto del CRM.
+// ═══════════════════════════════════════════════════════════════════════════
+// LIQUIDACIÓN REPCONT — el Excel mensual del técnico de los reefers
+//
+// El técnico cobra por día y por equipo. Hasta ahora eso se liquidaba a mano
+// en un Excel con una hoja por mes. Este bloque arma esa hoja desde los datos
+// del CRM y deja registro de lo que se emitió.
+//
+// QUÉ FACTURA Y QUÉ NO (regla verificada contra las 33 hojas del histórico)
+// ------------------------------------------------------------------------
+// Factura: tipología que contiene "REEFER" y que estuvo ALQUILADA en el mes.
+// No factura: los "REEF-PAÑOL" (son contenedores sin equipo de frío, usados
+// como pañol: no requieren servicio técnico) ni los que estuvieron en stock.
+// El cruce de septiembre 2026 confirmó la regla sin una sola excepción: de los
+// 12 REEF-PAÑOL, 11 no figuran siquiera en la planilla del técnico y el que
+// figura lleva 15 meses con cero días.
+//
+// OJO: NO se filtra por modelo_negocio. Ese campo sale del prefijo del código
+// de artículo de Tango (VBARE/VBAMO/VNQMO), o sea que clasifica QUÉ SE FACTURA
+// al cliente, no qué caja es. Un mismo reefer puede caer en BA MODULOS según
+// con qué artículo se lo facture. Filtrar por ahí dejaría equipos afuera.
+//
+// LOS DÍAS
+// --------
+// Se cuentan por unión de intervalos, nunca por suma. Si una serie tuvo dos
+// tramos en el mes, se fusionan los que se solapan y recién ahí se suman los
+// largos. Sumar sin fusionar es lo que hizo que ZCSU 511065-4, duplicada en el
+// Excel histórico desde julio 2025, acumulara 455 días de más (1.820 USD).
+// Ambos extremos se cobran (hasta - desde + 1), que es el criterio del Excel.
+//
+// LA TARIFA
+// ---------
+// No es una constante: fue 3,5 USD/día durante todo 2024 y pasó a 4 en enero
+// de 2025. Se resuelve por mes para que regenerar un mes viejo dé el número
+// que se pagó entonces, no el de hoy.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Escaper propio, a propósito. Adentro de este IIFE `esc()` es la versión de
+// la línea ~8723, que escapa SOLO comillas dobles. Los nombres de cliente y
+// las series entran por un Excel de Tango, así que no son texto de confianza:
+// con el esc() de acá adentro, un cliente llamado `<img onerror=...>` se
+// ejecutaría al pintar la tabla. Este escapa los cinco caracteres.
+function rcEsc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>(
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Quita tildes y pasa a mayúsculas. Hace falta porque "PAÑOL" puede venir en
+// NFC o NFD según de dónde salga el Excel, y un indexOf('PAÑOL') crudo falla
+// con la forma descompuesta sin dar ningún error.
+function rcNorm(s){
+  return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();
+}
+
+// "CONTENEDOR 40P HC REEFER"     -> true
+// "CONTENEDOR 20P ST REEFER"     -> true
+// "CONTENEDOR 40P HC REEF-PAÑOL" -> false  (no contiene "REEFER")
+// El segundo chequeo es redundante hoy y está a propósito: si mañana Tango
+// crea un "REEFER-PAÑOL", la primera condición sola lo dejaría pasar.
+function rcEsReeferFacturable(tipologia){
+  const t = rcNorm(tipologia);
+  return t.indexOf('REEFER') >= 0 && t.indexOf('PANOL') < 0;
+}
+function rcEsPanol(tipologia){
+  const t = rcNorm(tipologia);
+  return t.indexOf('REEF') >= 0 && t.indexOf('PANOL') >= 0;
+}
+
+// 3,5 USD/día hasta diciembre 2024; 4 desde enero 2025. La comparación de
+// strings 'YYYY-MM' alcanza y es estable.
+function rcTarifa(mesAnio){ return (String(mesAnio) < '2025-01') ? 3.5 : 4; }
+
+function rcUltimoDia(mesAnio){
+  const p = String(mesAnio).split('-');
+  return new Date(Number(p[0]), Number(p[1]), 0).getDate();
+}
+function rcNombreMes(mesAnio){
+  const M=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto',
+           'Septiembre','Octubre','Noviembre','Diciembre'];
+  const p = String(mesAnio).split('-');
+  return (M[Number(p[1])-1]||'') + ' ' + p[0];
+}
+
+// Fusiona tramos solapados o contiguos. Los tramos son días del mes (1..31),
+// enteros: así no hay husos horarios ni horas de por medio.
+function rcUnirTramos(tramos){
+  if(!tramos.length) return [];
+  const t = tramos.slice().sort((a,b)=> a.d-b.d || a.h-b.h);
+  const out = [{d:t[0].d, h:t[0].h}];
+  for(let i=1;i<t.length;i++){
+    const u = out[out.length-1];
+    if(t[i].d <= u.h + 1) u.h = Math.max(u.h, t[i].h);   // se tocan o se solapan
+    else out.push({d:t[i].d, h:t[i].h});
+  }
+  return out;
+}
+
+// Reconstruye los tramos alquilados de una serie dentro del mes.
+//
+// Punto de partida: el estado al CIERRE del mes, que es lo que guarda
+// ind_rental_data. Con los movimientos del mes se camina hacia atrás para
+// saber cómo arrancó, y después hacia adelante armando los tramos.
+//
+// Si no hay movimientos registrados en el mes, el resultado es el mes entero
+// cuando quedó alquilado, o nada cuando quedó en stock. Eso coincide con lo
+// que viene haciendo la planilla: en septiembre 2026, 57 de 57 filas eran mes
+// completo. Los movimientos solo hacen falta para los meses con alta o baja.
+function rcTramosDe(serie, mesAnio, alquiladoAlCierre){
+  const ult = rcUltimoDia(mesAnio);
+  const esAlq = s => rcNorm(s).indexOf('ALQUIL') >= 0;
+
+  // HISTORICO se excluye: son clientes anteriores sin fecha real (toman el
+  // now() del import), así que si el import cayó dentro del mes a liquidar
+  // ensuciarían el cálculo sin que se note.
+  const movs = (typeof STOCK_MOVS!=='undefined' ? STOCK_MOVS : [])
+    .filter(m => m && m.serie===serie && m.tipo!=='HISTORICO' && m.fecha
+                 && String(m.fecha).slice(0,7)===mesAnio)
+    .sort((a,b)=> String(a.fecha).localeCompare(String(b.fecha)) || (a.id||0)-(b.id||0));
+
+  if(!movs.length){
+    return { tramos: alquiladoAlCierre ? [{d:1,h:ult}] : [], base: 'mes-completo' };
+  }
+
+  // Estado al inicio: el anterior al primer movimiento del mes. Si ese campo
+  // viene vacío no se adivina: se cae al estado de cierre.
+  const ant0 = movs[0].estado_ant;
+  let estado = (ant0==null || ant0==='') ? !!alquiladoAlCierre : esAlq(ant0);
+
+  const tramos = [];
+  let abierto = estado ? 1 : null;
+  movs.forEach(m=>{
+    let dia = Number(String(m.fecha).slice(8,10)) || 1;
+    if(dia > ult) dia = ult;
+    const ahora = esAlq(m.estado_nuevo);
+    if(!estado && ahora){ abierto = dia; }
+    else if(estado && !ahora){
+      if(abierto!=null) tramos.push({d:abierto, h:dia});   // el día de la baja se cobra
+      abierto = null;
+    }
+    estado = ahora;
+  });
+  if(estado && abierto!=null) tramos.push({d:abierto, h:ult});
+
+  return { tramos: rcUnirTramos(tramos), base: 'movimientos' };
+}
+
+// Arma la liquidación de un mes. No toca la base ni genera nada: solo calcula.
+function rcCalcular(mesAnio){
+  const datos = (typeof allData!=='undefined' ? allData : []);
+  const delMes = datos.filter(r => r && r.mes_anio===mesAnio);
+
+  // Una entrada por serie. Si una serie viniera repetida en rental_data, gana
+  // la alquilada: el técnico cobra si el equipo estuvo en la calle.
+  const porSerie = {};
+  delMes.forEach(r=>{
+    const s = String(r.serie||'').trim();
+    if(!s) return;
+    const alq = (r.estado_serie==='Alquilado');
+    if(!porSerie[s] || (alq && !porSerie[s].alq)){
+      porSerie[s] = { serie:s, tipologia:r.tipologia||'', cliente:r.cliente||'',
+                      modelo:r.modelo_negocio||'', alq:alq };
+    }
+  });
+
+  const ult = rcUltimoDia(mesAnio);
+  const filas = [], panol = [];
+
+  Object.keys(porSerie).forEach(s=>{
+    const x = porSerie[s];
+    if(rcEsPanol(x.tipologia)){ panol.push(x); return; }
+    if(!rcEsReeferFacturable(x.tipologia)) return;
+
+    const t = rcTramosDe(x.serie, mesAnio, x.alq);
+    const dias = t.tramos.reduce((a,v)=> a + (v.h - v.d + 1), 0);
+    const es20 = rcNorm(x.tipologia).indexOf('20P') >= 0;
+    filas.push({
+      serie: x.serie,
+      tipo: es20 ? 20 : 40,
+      estado: x.alq ? 'ALQUILADO' : 'STOCK',
+      desde: t.tramos.length ? t.tramos[0].d : null,
+      hasta: t.tramos.length ? t.tramos[t.tramos.length-1].h : null,
+      dias: dias,
+      tramos: t.tramos,
+      cliente: x.alq ? (x.cliente||'') : '',
+      tipologia: x.tipologia,
+      base: t.base,
+      parcial: dias > 0 && dias < ult
+    });
+  });
+
+  filas.sort((a,b)=> a.tipo - b.tipo || String(a.serie).localeCompare(String(b.serie)));
+
+  const conDias = filas.filter(f=>f.dias>0);
+  const dias = conDias.reduce((a,f)=> a + f.dias, 0);
+  const usdDia = rcTarifa(mesAnio);
+
+  return {
+    mes: mesAnio,
+    filas: filas,
+    panol: panol,
+    dias: dias,
+    contenedores: conDias.length,
+    listados: filas.length,
+    usdDia: usdDia,
+    totalUsd: dias * usdDia,
+    novedades: rcNovedades(mesAnio, filas)
+  };
+}
+
+// Lo que cambió contra el mes anterior, más lo que conviene mirar dos veces.
+// No corrige nada: solo lo pone adelante para que se revise antes de emitir.
+function rcNovedades(mesAnio, filas){
+  const p = String(mesAnio).split('-');
+  let a = Number(p[0]), m = Number(p[1]) - 1;
+  if(m < 1){ m = 12; a -= 1; }
+  const prev = a + '-' + String(m).padStart(2,'0');
+
+  const datos = (typeof allData!=='undefined' ? allData : []);
+  const hayPrev = datos.some(r => r && r.mes_anio===prev);
+  const antes = new Set(datos
+    .filter(r => r && r.mes_anio===prev && r.estado_serie==='Alquilado'
+                 && rcEsReeferFacturable(r.tipologia))
+    .map(r => String(r.serie||'').trim()));
+
+  const ahora = new Set(filas.filter(f=>f.dias>0).map(f=>f.serie));
+  const out = [];
+
+  // Sin datos del mes anterior no hay con qué comparar. Listar los 52 reefers
+  // como "alta" sería ruido que tapa lo que sí importa (los parciales y los
+  // de varios tramos), así que se dice que no hay comparación y listo.
+  if(!hayPrev){
+    out.push({tipo:'aviso', serie:'', detalle:'no hay datos de '+prev
+      +' para comparar: no se listan altas ni bajas'});
+  }else{
+    filas.filter(f=> f.dias>0 && !antes.has(f.serie)).forEach(f=>
+      out.push({tipo:'alta', serie:f.serie, detalle:'no facturaba en '+prev+
+        (f.cliente?' · '+f.cliente:'')}));
+
+    antes.forEach(s=>{ if(!ahora.has(s))
+      out.push({tipo:'baja', serie:s, detalle:'facturaba en '+prev+' y este mes no'}); });
+  }
+
+  filas.filter(f=>f.parcial).forEach(f=>
+    out.push({tipo:'parcial', serie:f.serie,
+      detalle:f.dias+' días (del '+f.desde+' al '+f.hasta+') · revisá las fechas'}));
+
+  filas.filter(f=> f.tramos.length > 1).forEach(f=>
+    out.push({tipo:'tramos', serie:f.serie,
+      detalle:f.tramos.length+' tramos en el mes, unificados en una fila'}));
+
+  return out;
+}
+
+// Meses con datos, del más nuevo al más viejo. El que viene seleccionado es el
+// último mes CERRADO: el mes en curso todavía no se liquida.
+function rcMeses(){
+  const datos = (typeof allData!=='undefined' ? allData : []);
+  const s = new Set();
+  datos.forEach(r=>{ if(r && r.mes_anio) s.add(r.mes_anio); });
+  return Array.from(s).sort().reverse();
+}
+function rcMesPorDefecto(){
+  const hoy = new Date();
+  const actual = hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0');
+  const ms = rcMeses();
+  return ms.find(m => m < actual) || ms[0] || '';
+}
+
+// ── El tipo de cambio ──────────────────────────────────────────────────────
+// Criterio del técnico: el vendedor billete del día en que se le pasa la
+// liquidación, porque factura con ese. Por eso se busca la cotización de hoy
+// y no la del cierre del mes.
+//
+// NUNCA devuelve un número inventado. Si ninguna fuente responde, devuelve
+// null y la persona lo escribe a mano. Un default silencioso acá sería un
+// error de miles de dólares que nadie vería: el CRM ya tiene una función
+// tcDe() que devuelve 1 cuando no encuentra la moneda, y un 1470 hardcodeado
+// como default en la carga. Ninguna de las dos se usa acá.
+async function rcCotizacion(){
+  const fuentes = [
+    { url:'https://dolarapi.com/v1/dolares/oficial',
+      leer:j => ({ valor:Number(j && j.venta),
+                   fecha:String((j && j.fechaActualizacion)||'').slice(0,10),
+                   fuente:'dolarapi · oficial vendedor' }) },
+    { url:'https://api.bluelytics.com.ar/v2/latest',
+      leer:j => ({ valor:Number(j && j.oficial && j.oficial.value_sell),
+                   fecha:String((j && j.last_update)||'').slice(0,10),
+                   fuente:'bluelytics · oficial vendedor' }) }
+  ];
+  for(const f of fuentes){
+    try{
+      const ctl = new AbortController();
+      const to = setTimeout(()=>ctl.abort(), 8000);
+      const r = await fetch(f.url, {cache:'no-store', signal:ctl.signal});
+      clearTimeout(to);
+      if(!r.ok) continue;
+      const o = f.leer(await r.json());
+      if(o.valor > 0 && isFinite(o.valor)) return o;
+    }catch(_){ /* se prueba la siguiente */ }
+  }
+  return null;
+}
+
+// ── La UI ──────────────────────────────────────────────────────────────────
+let RC_CALC = null, RC_LIQS = [], RC_LIQS_OK = false;
+
+// Las liquidaciones ya emitidas, para el historial y para el recordatorio.
+async function rcCargarLiqs(){
+  try{
+    const r = await sb.from('ind_liquidacion_repcont').select('*').order('mes_anio',{ascending:false});
+    if(r && r.error) throw r.error;
+    RC_LIQS = (r && r.data) ? r.data : [];
+    RC_LIQS_OK = true;
+  }catch(_){
+    // Si la tabla todavía no existe (falta correr el .sql), no se rompe nada:
+    // el botón sigue andando y lo único que falta es el aviso y el historial.
+    RC_LIQS = [];
+  }
+  return RC_LIQS;
+}
+
+// El botón aparece solo con BA REEFERS elegido: el técnico cobra únicamente
+// por los reefers. Se llama desde setModelo.
+function rcToggle(){
+  const g = document.getElementById('rc-grupo');
+  if(!g) return;
+  const on = (typeof curModelo!=='undefined' && curModelo === 'BA REEFERS');
+  g.style.display = on ? 'flex' : 'none';
+  if(!on) return;
+  if(RC_LIQS_OK) rcActualizarAviso();
+  else rcCargarLiqs().then(rcActualizarAviso).catch(()=>{});
+}
+
+// Punto rojo en el botón mientras el último mes cerrado no se haya liquidado.
+// Es el recordatorio que se pidió: se apaga solo cuando se genera.
+function rcActualizarAviso(){
+  const b = document.getElementById('rc-aviso');
+  if(!b) return;
+  const mes = rcMesPorDefecto();
+  const falta = mes && !RC_LIQS.some(l => l.mes_anio===mes);
+  b.style.display = falta ? '' : 'none';
+  b.title = falta ? ('Falta liquidar ' + rcNombreMes(mes)) : '';
+}
+
+function repcontAbrir(){
+  const ms = rcMeses();
+  if(!ms.length){ try{ toast('No hay datos de rental cargados todavía.'); }catch(_){} return; }
+  const sel = document.getElementById('rc-mes');
+  if(sel){
+    sel.innerHTML = ms.map(m=>'<option value="'+rcEsc(m)+'">'+rcEsc(rcNombreMes(m))+'</option>').join('');
+    sel.value = rcMesPorDefecto();
+  }
+  const tar = document.getElementById('rc-usd');
+  const mod = document.getElementById('rc-modal');
+  if(mod) mod.style.display = 'flex';
+  if(tar) tar.value = rcTarifa(sel ? sel.value : rcMesPorDefecto());
+  repcontCambiarMes();
+  rcBuscarTC();
+}
+function repcontCerrar(){
+  const m = document.getElementById('rc-modal');
+  if(m) m.style.display = 'none';
+}
+
+async function rcBuscarTC(){
+  const inp = document.getElementById('rc-tc');
+  const nota = document.getElementById('rc-tc-nota');
+  if(!inp) return;
+  if(nota) nota.textContent = 'Buscando la cotización...';
+  const c = await rcCotizacion();
+  if(c){
+    inp.value = c.valor;
+    inp.dataset.tcTraido = String(c.valor);   // para saber después si se editó
+    inp.dataset.fuente = c.fuente;
+    inp.dataset.fecha = c.fecha || '';
+    if(nota) nota.textContent = c.fuente + (c.fecha ? ' · ' + fechaCorta(c.fecha) : '');
+  }else{
+    inp.value = '';
+    inp.dataset.tcTraido = '';
+    inp.dataset.fuente = '';
+    inp.dataset.fecha = '';
+    if(nota) nota.textContent = 'No se pudo traer la cotización. Escribila a mano (vendedor billete del BNA).';
+  }
+  rcPintarTotales();
+}
+
+function repcontCambiarMes(){
+  const sel = document.getElementById('rc-mes');
+  const mes = sel ? sel.value : rcMesPorDefecto();
+  if(!mes) return;
+  RC_CALC = rcCalcular(mes);
+  const tar = document.getElementById('rc-usd');
+  if(tar) tar.value = RC_CALC.usdDia;
+  rcPintarDetalle();
+  rcPintarTotales();
+}
+
+function rcPintarDetalle(){
+  const c = RC_CALC;
+  const cont = document.getElementById('rc-detalle');
+  if(!cont || !c) return;
+  const f = c.filas;
+  if(!f.length){ cont.innerHTML = '<div class="rc-vacio">No hay reefers con datos en este mes.</div>'; return; }
+  cont.innerHTML =
+    '<table class="rc-tabla"><thead><tr>'
+    + '<th>Contenedor</th><th>Tipo</th><th>Estado</th><th>Desde</th><th>Hasta</th>'
+    + '<th style="text-align:right">Días</th><th>Cliente</th></tr></thead><tbody>'
+    + f.map(x=>{
+        // Una sola lista de clases: dos atributos class en el mismo <tr> hacen
+        // que el navegador descarte el segundo en silencio.
+        const cls = [x.dias ? '' : 'rc-sin', x.parcial ? 'rc-parcial' : ''].filter(Boolean).join(' ');
+        return '<tr'+(cls ? ' class="'+cls+'"' : '')+'>'
+        + '<td>'+rcEsc(x.serie)+'</td><td>'+x.tipo+'</td><td>'+rcEsc(x.estado)+'</td>'
+        + '<td>'+(x.desde||'')+'</td><td>'+(x.hasta||'')+'</td>'
+        + '<td style="text-align:right">'+(x.dias||'')+'</td>'
+        + '<td>'+rcEsc(x.cliente)+'</td></tr>';
+      }).join('')
+    + '</tbody></table>';
+
+  const nov = document.getElementById('rc-novedades');
+  if(nov){
+    const ET = {alta:'Alta', baja:'Baja', parcial:'Mes parcial',
+                tramos:'Varios tramos', aviso:'Sin comparación'};
+    const extra = c.panol.length
+      ? '<div class="rc-nov-item"><b>Excluidos</b> · '+c.panol.length
+        +' reefer-pañol, no computan para el técnico</div>' : '';
+    // Lo que hay que mirar dos veces va primero; las altas y bajas después.
+    // Y se corta la lista: con 50 líneas nadie lee ninguna.
+    // Ojo con el ||: orden.parcial es 0 y `0 || 9` da 9, que mandaba los
+    // parciales (lo que más hay que revisar) al final de la lista.
+    const orden = {parcial:1, tramos:2, aviso:3, baja:4, alta:5};
+    const pos = n => orden[n.tipo] || 9;
+    const lista = c.novedades.slice().sort((a,b)=> pos(a) - pos(b));
+    const TOPE = 14;
+    const pinta = n =>
+      '<div class="rc-nov-item rc-nov-'+rcEsc(n.tipo)+'"><b>'+rcEsc(ET[n.tipo]||n.tipo)+'</b>'
+      + (n.serie ? ' · '+rcEsc(n.serie) : '') + ' — ' + rcEsc(n.detalle) + '</div>';
+    const resto = lista.length > TOPE
+      ? '<div class="rc-nov-item">y '+(lista.length-TOPE)+' más · están todas en el Excel</div>' : '';
+    nov.innerHTML = (lista.length || extra)
+      ? extra + lista.slice(0,TOPE).map(pinta).join('') + resto
+      : '<div class="rc-nov-item">Sin novedades contra el mes anterior.</div>';
+  }
+}
+
+function rcPintarTotales(){
+  const c = RC_CALC;
+  const el = document.getElementById('rc-totales');
+  const btn = document.getElementById('rc-generar');
+  if(!el || !c) return;
+  const usdDia = Number((document.getElementById('rc-usd')||{}).value) || 0;
+  const tc = Number((document.getElementById('rc-tc')||{}).value) || 0;
+  const usd = c.dias * usdDia;
+  const fmt = n => n.toLocaleString('es-AR',{minimumFractionDigits:0, maximumFractionDigits:2});
+  el.innerHTML =
+      '<div><span>Contenedores</span><b>'+c.contenedores+'</b></div>'
+    + '<div><span>Días</span><b>'+c.dias+'</b></div>'
+    + '<div><span>USD</span><b>'+fmt(usd)+'</b></div>'
+    + '<div><span>Pesos</span><b>'+(tc>0 ? '$ '+fmt(usd*tc) : '—')+'</b></div>';
+  if(btn){
+    const ok = c.dias > 0 && usdDia > 0 && tc > 0;
+    btn.disabled = !ok;
+    btn.title = ok ? '' : 'Falta el tipo de cambio o la tarifa';
+  }
+}
+
+async function repcontGenerar(){
+  const c = RC_CALC;
+  if(!c) return;
+  const usdDia = Number((document.getElementById('rc-usd')||{}).value) || 0;
+  const inpTC = document.getElementById('rc-tc');
+  const tc = Number(inpTC ? inpTC.value : 0) || 0;
+  if(!(c.dias>0 && usdDia>0 && tc>0)) return;
+
+  const btn = document.getElementById('rc-generar');
+  const antes = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = 'Generando...'; }
+
+  // La fuente del TC: si el número se editó a mano respecto de lo que trajo la
+  // API, se registra como manual. Que quede escrito de dónde salió es el punto
+  // de guardar esto: el Excel histórico nunca lo dijo.
+  const traido = Number(inpTC && inpTC.dataset ? inpTC.dataset.tcTraido : 0) || 0;
+  const fuente = (traido && Math.abs(traido - tc) < 1e-9 && inpTC.dataset.fuente)
+    ? inpTC.dataset.fuente : 'manual';
+  const tcFecha = (fuente!=='manual' && inpTC.dataset.fecha) ? inpTC.dataset.fecha
+    : new Date().toISOString().slice(0,10);
+
+  try{
+    await rcExcel(c, usdDia, tc, fuente, tcFecha);
+
+    // El registro va DESPUÉS de que el archivo se generó: si el Excel falla,
+    // no queda una liquidación anotada que nunca se mandó.
+    try{
+      const fila = {
+        mes_anio:c.mes, dias:c.dias, contenedores:c.contenedores, listados:c.listados,
+        usd_dia:usdDia, total_usd:c.dias*usdDia,
+        tc:tc, tc_fecha:tcFecha, tc_fuente:fuente, total_pesos:c.dias*usdDia*tc,
+        detalle: c.filas.map(f=>({serie:f.serie, dias:f.dias, desde:f.desde,
+                                  hasta:f.hasta, cliente:f.cliente, base:f.base})),
+        diferencias: c.novedades,
+        generado_por: (currentUser && currentUser.email) || ''
+      };
+      const r = await sb.from('ind_liquidacion_repcont').upsert(fila, {onConflict:'mes_anio'});
+      if(r && r.error) throw r.error;
+      await rcCargarLiqs();
+      rcActualizarAviso();
+      try{ toast('Liquidación de '+rcNombreMes(c.mes)+' generada y registrada.'); }catch(_){}
+    }catch(e){
+      // El Excel ya se bajó: eso es lo que importa. Que no se haya podido
+      // registrar se avisa, no se esconde.
+      console.error(e);
+      try{ toast('El Excel se generó, pero no se pudo registrar la liquidación: '+(e.message||e)); }catch(_){}
+    }
+    repcontCerrar();
+  }catch(e){
+    console.error(e);
+    alert('No se pudo generar el Excel: ' + (e && e.message ? e.message : e));
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = antes; }
+  }
+}
+
+// Arma el .xlsx replicando la hoja que el técnico viene recibiendo: mismas
+// columnas A-F en el mismo orden, mismas bandas de sección, mismo pie
+// encadenado. Se agregan CLIENTE en G y NOTAS en H, a la DERECHA de F, para
+// no tocar las fórmulas del pie (que referencian E y F).
+//
+// El armado de la grilla y el cálculo de las filas del pie va aparte, sin
+// depender de la librería: es la parte que más fácil se rompe (la fila del pie
+// se mueve con la cantidad de contenedores del mes) y así se puede probar sola.
+function rcArmarHoja(c, usdDia, tc, fuente, tcFecha){
+  const [anio, mes] = c.mes.split('-').map(Number);
+  const fechaCel = d => new Date(Date.UTC(anio, mes-1, d));
+  const AOA = [];
+
+  AOA.push(['', 'TIPO', 'ESTADO', 'DESDE', 'HASTA', 'DIAS', 'CLIENTE', 'NOTAS']);
+  AOA.push(['REEFER', '', '', '', '', '', '', '']);
+
+  const bloque = (titulo, filas)=>{
+    AOA.push([titulo, '', '', '', '', '', '', '']);
+    filas.forEach(f=>{
+      const nota = f.tramos.length > 1
+        ? f.tramos.map(t=>t.d+'-'+t.h).join(' / ') + ' (unificado)' : '';
+      AOA.push([f.serie, f.tipo, f.estado,
+                f.dias ? fechaCel(f.desde) : '',
+                f.dias ? fechaCel(f.hasta) : '',
+                f.dias || '', f.cliente, nota]);
+    });
+  };
+  bloque('20 PIES ', c.filas.filter(f=>f.tipo===20));
+  bloque('40 PIES HC', c.filas.filter(f=>f.tipo===40));
+
+  // El pie, con las mismas filas relativas que el histórico: dos renglones en
+  // blanco, la suma, otro en blanco, y después Dias / USD / Pesos encadenados.
+  const vacia = ()=> ['', '', '', '', '', '', '', ''];
+  const ultFila = AOA.length;               // 1-based: última fila de datos
+  AOA.push(vacia()); AOA.push(vacia());     // ultFila+1, ultFila+2
+  AOA.push(vacia()); const rSum   = AOA.length;   // ultFila+3
+  AOA.push(vacia());                               // ultFila+4 en blanco
+  AOA.push(vacia()); const rDias  = AOA.length;   // ultFila+5
+  AOA.push(vacia()); const rUsd   = AOA.length;   // ultFila+6
+  AOA.push(vacia()); const rPesos = AOA.length;   // ultFila+7
+
+  const totalUsd = c.dias * usdDia;
+  return {
+    AOA: AOA, ultFila: ultFila, rSum: rSum, rDias: rDias, rUsd: rUsd, rPesos: rPesos,
+    totalUsd: totalUsd, totalPesos: totalUsd * tc,
+    hoja: String(mes).padStart(2,'0') + '-' + anio,
+    // Las fórmulas, con su celda y su valor ya calculado.
+    celdas: [
+      ['F'+rSum,   {t:'n', v:c.dias,        f:'SUM(F4:F'+(rSum-1)+')', z:'0'}],
+      ['E'+rDias,  {t:'s', v:'Dias'}],
+      ['F'+rDias,  {t:'n', v:c.dias,        f:'F'+rSum, z:'0'}],
+      ['E'+rUsd,   {t:'s', v:'Pesos'}],
+      ['F'+rUsd,   {t:'n', v:totalUsd,      f:'F'+rDias+'*'+usdDia, z:'[$USD]\\ #,##0'}],
+      // La trazabilidad que al Excel histórico le faltaba: el TC era un número
+      // pelado, sin etiqueta, sin fecha y sin fuente.
+      ['D'+rPesos, {t:'s', v:'TC ' + fuente + ' ' + (tcFecha ? fechaCorta(tcFecha) : '')}],
+      ['E'+rPesos, {t:'n', v:tc,            z:'#,##0.00'}],
+      ['F'+rPesos, {t:'n', v:totalUsd*tc,   f:'F'+rUsd+'*E'+rPesos,
+                    z:'_-"$"\\ * #,##0.00_-;\\-"$"\\ * #,##0.00_-;_-"$"\\ * "-"??_-;_-@_-'}]
+    ]
+  };
+}
+
+async function rcExcel(c, usdDia, tc, fuente, tcFecha){
+  const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
+  const H = rcArmarHoja(c, usdDia, tc, fuente, tcFecha);
+  const AOA = H.AOA, ultFila = H.ultFila, rPesos = H.rPesos;
+
+  const ws = XLSX.utils.aoa_to_sheet(AOA, {cellDates:true});
+
+  // Las fórmulas del pie se escriben a mano porque su fila depende de cuántos
+  // contenedores haya ese mes. En el Excel histórico esa fila se movió entre la
+  // 79 y la 87 según el mes, y en julio 2025 quedó mal escrita
+  // (=SUM(F11:F79) en vez de =SUM(F4:F79)): se comió las tres filas de 20
+  // pies y le pagó 93 días de menos al técnico. Calcularla elimina ese error.
+  H.celdas.forEach(par=>{
+    ws[par[0]] = Object.assign(ws[par[0]] || {t:'n'}, par[1]);
+  });
+
+  for(let r=4; r<=ultFila; r++){
+    ['D','E'].forEach(col=>{ if(ws[col+r] && ws[col+r].t==='d') ws[col+r].z = 'dd/mm/yyyy'; });
+    if(ws['F'+r] && ws['F'+r].t==='n') ws['F'+r].z = '0';
+  }
+
+  ws['!cols'] = [{wch:15.7},{wch:7.5},{wch:13.2},{wch:10.9},{wch:12.1},
+                 {wch:9},{wch:28},{wch:30}];
+  ws['!ref'] = XLSX.utils.encode_range({s:{r:0,c:0}, e:{r:rPesos-1, c:7}});
+
+  // La hoja se llama como en el histórico: '09-2026', no '2026-09'.
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, H.hoja);
+
+  // Hoja HISTORIAL: una fila por liquidación emitida. Se arma desde la tabla,
+  // así el archivo que se manda lleva el acumulado aunque se genere de cero.
+  const previas = RC_LIQS.filter(l=> l.mes_anio !== c.mes);
+  const hist = previas.concat([{
+    mes_anio:c.mes, dias:c.dias, contenedores:c.contenedores, listados:c.listados,
+    usd_dia:usdDia, total_usd:c.dias*usdDia, tc:tc, tc_fecha:tcFecha,
+    tc_fuente:fuente, total_pesos:c.dias*usdDia*tc,
+    generado_por:(currentUser && currentUser.email)||'', generado_en:new Date().toISOString()
+  }]).sort((a,b)=> String(a.mes_anio).localeCompare(String(b.mes_anio)));
+
+  const hAOA = [['MES','PERIODO','CONTENEDORES','LISTADOS','DIAS','USD/DIA',
+                 'TOTAL USD','TC','FECHA TC','FUENTE TC','TOTAL PESOS','GENERADO POR','GENERADO']];
+  hist.forEach(l=> hAOA.push([
+    l.mes_anio, rcNombreMes(l.mes_anio), Number(l.contenedores)||0, Number(l.listados)||0,
+    Number(l.dias)||0, Number(l.usd_dia)||0, Number(l.total_usd)||0, Number(l.tc)||0,
+    l.tc_fecha ? fechaCorta(l.tc_fecha) : '', l.tc_fuente||'', Number(l.total_pesos)||0,
+    l.generado_por||'', l.generado_en ? fechaCorta(l.generado_en) : '']));
+  const ws2 = XLSX.utils.aoa_to_sheet(hAOA);
+  ws2['!cols'] = [{wch:9},{wch:18},{wch:14},{wch:10},{wch:8},{wch:9},{wch:12},
+                  {wch:10},{wch:11},{wch:26},{wch:16},{wch:30},{wch:12}];
+  for(let r=2; r<=hAOA.length; r++){
+    if(ws2['G'+r]) ws2['G'+r].z = '[$USD]\\ #,##0';
+    if(ws2['K'+r]) ws2['K'+r].z = '$#,##0.00';
+  }
+  XLSX.utils.book_append_sheet(wb, ws2, 'HISTORIAL');
+
+  XLSX.writeFile(wb, 'LIQUIDACION REPCONT ' + c.mes + '.xlsx');
+}
+
+
 window.IND = {
     abrirFicha: abrirFicha,
     cambiarEstado: cambiarEstado,
@@ -9406,6 +10158,12 @@ window.IND = {
     markRead: markRead,
     refrescarSimbolo: refrescarSimbolo,
     renderStockLista: renderStockLista,
+    repcontAbrir: repcontAbrir,
+    repcontBuscarTC: rcBuscarTC,
+    repcontCambiarMes: repcontCambiarMes,
+    repcontCerrar: repcontCerrar,
+    repcontGenerar: repcontGenerar,
+    repcontRecalcular: rcPintarTotales,
     sendMsg: sendMsg,
     setAnio: setAnio,
     setMesCustom: setMesCustom,

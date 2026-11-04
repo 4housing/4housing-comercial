@@ -234,6 +234,59 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
     la lista tiene "Ignacio Sánchez Moser"), con respaldo por el usuario del
     mail. Si no matchea, no adivina: muestra todo el equipo y avisa.
   - "Mis pendientes" es comodidad visual, **no** barrera de seguridad.
+- **Liquidación Repcont** (Indicadores → Stock, con **BA Reefers** elegido):
+  genera el Excel mensual del técnico de los reefers, que cobra por día y por
+  equipo. Reemplaza una planilla que se llevaba a mano desde enero de 2024.
+  - **La regla de facturación**, verificada contra las 33 hojas del histórico y
+    contra los datos de producción de septiembre 2026: factura la serie cuya
+    `tipologia` contiene **`REEFER`** y que estuvo **alquilada** en el mes.
+    `REEF-PAÑOL` queda afuera porque la cadena no contiene `REEFER` (son
+    contenedores sin equipo de frío, usados como pañol: no requieren servicio
+    técnico). De los 12 `REEF-PAÑOL`, 11 no figuran siquiera en la planilla del
+    técnico y el que figura lleva 15 meses con cero días. Cero excepciones.
+  - **NO se filtra por `modelo_negocio`**, y es importante: ese campo sale del
+    prefijo del código de artículo de Tango (`VBARE`/`VBAMO`/`VNQMO`), o sea
+    que clasifica **qué se le factura al cliente**, no qué caja es. Hay reefers
+    reales bajo `BA MODULOS`. Filtrar por ahí dejaría equipos afuera.
+  - **Los días se calculan por unión de intervalos, nunca por suma.** Si una
+    serie tuvo varios tramos en el mes se fusionan los que se solapan y recién
+    ahí se suman los largos. Sumar sin fusionar es lo que hizo que
+    `ZCSU 511065-4`, duplicada en el Excel histórico desde julio 2025,
+    acumulara 455 días de más (1.820 USD). Ambos extremos se cobran
+    (`hasta - desde + 1`), que es el criterio del histórico.
+  - **La tarifa no es constante**: 3,5 USD/día en todo 2024, 4 desde enero de
+    2025. Se resuelve por mes, así regenerar un mes viejo da lo que se pagó
+    entonces. El campo es editable.
+  - **El tipo de cambio es el del día en que se baja el informe**, no el del
+    cierre del mes: es el criterio del técnico, que factura con el TC del día
+    en que recibe la liquidación. Se trae de `dolarapi` con respaldo en
+    `bluelytics`, **se muestra y se puede editar**, y si ninguna fuente
+    responde queda vacío y se escribe a mano. **Nunca hay un default
+    silencioso**: el CRM ya tiene un `tcDe()` que devuelve `1` cuando no
+    encuentra la moneda y un `1470` hardcodeado en la carga; ninguno de los dos
+    se usa acá, y reusarlos daría un total mil veces menor sin tirar un error.
+  - Como el TC depende del día de descarga, el mismo mes daría distinto cada
+    vez. Por eso la tabla **`ind_liquidacion_repcont`** guarda el TC usado con
+    su **fecha y su fuente**, más el detalle por serie. El Excel histórico no
+    guardaba nada de eso: el TC era un número pelado tipeado en una celda.
+  - El archivo lleva dos hojas: la del mes (misma estructura que el histórico,
+    con **CLIENTE en G y NOTAS en H** — a la derecha de F, para no tocar las
+    fórmulas del pie, que referencian E y F) y **HISTORIAL**, que se arma desde
+    la tabla.
+  - **La fila del pie se calcula**, no se clava: en el histórico se movió entre
+    la 79 y la 87 según el mes, y en **julio 2025 quedó mal escrita**
+    (`=SUM(F11:F79)` en vez de `=SUM(F4:F79)`), lo que se comió las tres filas
+    de 20 pies: **93 días = 372 USD que no se le pagaron al técnico**.
+  - El modal muestra un panel de **novedades** (altas, bajas, meses parciales,
+    series con varios tramos, pañol excluidos). No corrige nada solo: lo pone
+    adelante para que se revise antes de emitir.
+  - **El bloque define su propio `rcEsc()` y eso no es cosmético:** adentro del
+    IIFE de Indicadores, `esc()` es la versión que escapa **solo comillas
+    dobles**; la buena del CRM queda tapada. Los nombres de cliente vienen del
+    Excel de Tango, así que no son de confianza. Usar `esc()` ahí sería XSS.
+  - **Única función existente que se tocó:** `setModelo()`, que suma una llamada
+    a `rcToggle()` dentro de un `try/catch` para mostrar u ocultar el botón.
+    El resto es todo agregado: 737 líneas insertadas, 0 borradas.
 - **Duplicar cotización**: copia una OE en una oferta nueva (número propio,
   versión 01). Distinto de "Nueva versión". No hereda fecha de envío, carpeta
   de SharePoint ni la oportunidad de origen (copiar `fromOppId` le robaría la
@@ -269,6 +322,26 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
 
 - `COD_GVA23` de Victoria López Aybar en Tango: falta dar de alta como vendedora.
 - Config `lista_precios_dolar_billete`: falta completar el número de lista de Tango.
+- **Diferencias abiertas en la liquidación del técnico de reefers** (salieron de
+  cruzar el Excel histórico contra la base, 4/11/2026). Ninguna se corrigió:
+  son decisiones comerciales, no bugs del código.
+  - **5 series que la planilla factura y que no existen en `ind_rental_data`**:
+    `CRLU 110562-4`, `FSCU 560476-4`, `SCXU 492781-3`, `SUDU 475338-3`,
+    `TOLU 780207-8`. 150 días por mes = 600 USD. Falta confirmar si salieron de
+    la flota o si es un error de clasificación en Tango.
+  - **3 que la planilla factura y la base tiene en stock**: `CRLU 726949-8`,
+    `SUDU 475651-0`, `ZCSU 511065-4`. En septiembre 2026 cobran mes completo,
+    y ese mes no tuvo ningún tramo parcial.
+  - **4 alquiladas a las que la planilla no les puso días**: `CCLU 859877-6`,
+    `CCLU 860139-7`, `CXRU 118045-3`, `SUDU 475293-6`.
+  - **`ZCSU 511065-4` está duplicada en 15 hojas seguidas** (07-2025 a 09-2026):
+    455 días de más, 1.820 USD. El botón la cuenta una sola vez.
+  - **Julio 2025 se pagó de menos**: la fórmula del total de esa hoja arranca en
+    `F11` en vez de `F4` y se comió el bloque de 20 pies. 93 días = 372 USD
+    (al TC 1375 de esa hoja, ARS 511.500). Es la única hoja de 33 con el rango
+    mal.
+  - En conjunto, para septiembre 2026 el botón da **150 días menos** que la
+    planilla: 1.560 contra 1.710 (600 USD, ARS 930.000 al TC 1550).
 - **Pedido draft UI** dentro de cada cobranza — próximo paso grande, requiere
   tocar el `index.html` actual completo.
 - Push de pedidos a Tango vía API (`POST Api/Create/{process}`) una vez exista
