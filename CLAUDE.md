@@ -234,6 +234,100 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
     la lista tiene "Ignacio Sánchez Moser"), con respaldo por el usuario del
     mail. Si no matchea, no adivina: muestra todo el equipo y avisa.
   - "Mis pendientes" es comodidad visual, **no** barrera de seguridad.
+- **Liquidación Repcont** (Indicadores → Stock, con **BA Reefers** elegido):
+  genera el Excel mensual del técnico de los reefers, que cobra por día y por
+  equipo. Reemplaza una planilla que se llevaba a mano desde enero de 2024.
+  - **La regla de facturación**, verificada contra las 33 hojas del histórico y
+    contra los datos de producción de septiembre 2026: factura la serie cuya
+    `tipologia` contiene **`REEFER`** y que estuvo **alquilada** en el mes.
+    `REEF-PAÑOL` queda afuera porque la cadena no contiene `REEFER` (son
+    contenedores sin equipo de frío, usados como pañol: no requieren servicio
+    técnico). De los 12 `REEF-PAÑOL`, 11 no figuran siquiera en la planilla del
+    técnico y el que figura lleva 15 meses con cero días. Cero excepciones.
+  - **NO se filtra por `modelo_negocio`**, y es importante: ese campo sale del
+    prefijo del código de artículo de Tango (`VBARE`/`VBAMO`/`VNQMO`), o sea
+    que clasifica **qué se le factura al cliente**, no qué caja es. Hay reefers
+    reales bajo `BA MODULOS`. Filtrar por ahí dejaría equipos afuera.
+  - **Los días se calculan por unión de intervalos, nunca por suma.** Si una
+    serie tuvo varios tramos en el mes se fusionan los que se solapan y recién
+    ahí se suman los largos. Sumar sin fusionar es lo que hizo que
+    `ZCSU 511065-4`, duplicada en el Excel histórico desde julio 2025,
+    acumulara 455 días de más (1.820 USD). Ambos extremos se cobran
+    (`hasta - desde + 1`), que es el criterio del histórico.
+  - **La tarifa no es constante**: 3,5 USD/día en todo 2024, 4 desde enero de
+    2025. Se resuelve por mes, así regenerar un mes viejo da lo que se pagó
+    entonces. El campo es editable.
+  - **El tipo de cambio es el del día en que se baja el informe**, no el del
+    cierre del mes: es el criterio del técnico, que factura con el TC del día
+    en que recibe la liquidación. Se trae de `dolarapi` con respaldo en
+    `bluelytics`, **se muestra y se puede editar**, y si ninguna fuente
+    responde queda vacío y se escribe a mano. **Nunca hay un default
+    silencioso**: el CRM ya tiene un `tcDe()` que devuelve `1` cuando no
+    encuentra la moneda y un `1470` hardcodeado en la carga; ninguno de los dos
+    se usa acá, y reusarlos daría un total mil veces menor sin tirar un error.
+  - Como el TC depende del día de descarga, el mismo mes daría distinto cada
+    vez. Por eso la tabla **`ind_liquidacion_repcont`** guarda el TC usado con
+    su **fecha y su fuente**, más el detalle por serie. El Excel histórico no
+    guardaba nada de eso: el TC era un número pelado tipeado en una celda.
+  - **Los 33 meses ya liquidados se cargaron de entrada**
+    (`sql/2026-11-04-repcont-historial.sql`): sin eso la hoja HISTORIAL del
+    primer archivo generado salía con una sola fila. Registra **lo que se
+    pagó**, no lo que correspondía — incluidos los meses con equipos ya
+    vendidos, la serie duplicada y el total mal sumado de julio 2025. El
+    historial es el registro de lo que pasó; corregirlo ahí taparía justo lo
+    que hay que reclamar. `tc_fecha` queda en NULL a propósito: la planilla
+    nunca anotó a qué día correspondía la cotización. Va con
+    `on conflict (mes_anio) do nothing`, así nunca pisa una liquidación hecha
+    desde el botón, y el rollback borra solo lo cargado
+    (`generado_por = 'carga histórica'`). Total del período:
+    **USD 227.997 / $ 280.393.660** en 33 meses.
+  - El archivo lleva dos hojas: la del mes (misma estructura que el histórico,
+    con **CLIENTE en G y NOTAS en H** — a la derecha de F, para no tocar las
+    fórmulas del pie, que referencian E y F) y **HISTORIAL**, que se arma desde
+    la tabla.
+  - **La fila del pie se calcula**, no se clava: en el histórico se movió entre
+    la 79 y la 87 según el mes, y en **julio 2025 quedó mal escrita**
+    (`=SUM(F11:F79)` en vez de `=SUM(F4:F79)`), lo que se comió las tres filas
+    de 20 pies: **93 días = 372 USD que no se le pagaron al técnico**.
+  - **NUNCA pasar un objeto `Date` por SheetJS.** Al escribir sin
+    `{cellDates:true}`, `datenum()` interpreta la fecha en hora **local del
+    navegador**, así que en Buenos Aires (UTC-3) un `Date.UTC(2026,8,1)` se
+    guarda como **31/08/2026 20:59:12**: la hoja entera sale corrida un día, se
+    mete en el mes anterior y contradice la columna DIAS, sin ningún error.
+    `new Date(anio, mes-1, d)` tampoco sirve: `datenum` resta la diferencia de
+    husos contra 1899-12-30, y para Buenos Aires ese offset es **256 min**
+    (CMT −4:16:48) contra 180 de hoy, o sea 23:59:12 del día anterior. Se
+    escribe el **serial de Excel a mano**: `Date.UTC(a,m,d)/86400000 + 25569`.
+    Las celdas quedan `t==='n'`, no `t==='d'`, y el formato se aplica como tal.
+    **Un entorno de prueba en UTC no detecta esto**: hay que forzar el huso
+    (en Playwright, `timezoneId`).
+  - **El mes en curso no se puede elegir**, y hay que mantenerlo así: `allData`
+    lo incluye (`mesesDeStock`/`recomponerDatos` sintetizan las filas del mes
+    abierto para el "● En vivo"), y `rcTramosDe` sin movimientos devuelve el
+    **mes completo**. Elegirlo liquidaría días que todavía no pasaron, `parcial`
+    daría `false` porque `dias == último`, y el upsert por `mes_anio` dejaría
+    asentada esa fila hasta que alguien regenere el mes de verdad.
+  - **`ind_stock_movimientos` se carga sin paginar** (`index.html:8374`), y
+    PostgREST corta en 1000 filas. Hoy son ~531, pero la tabla solo crece: si
+    llega al tope, los meses con alta o baja se liquidarían como mes completo
+    en silencio. El modal avisa cuando `STOCK_MOVS.length >= 1000`. **El
+    arreglo de fondo es migrar esa carga a `SB._fetchAll()`**, que es el patrón
+    del proyecto, pero toca código compartido y no se hizo con esta feature.
+  - Si un reefer facturaba el mes anterior y este mes **no tiene ninguna fila**
+    en `ind_rental_data`, se marca como **"Falta el dato"**, distinto de una
+    baja: una baja es un hecho comercial, esto es un agujero en los datos. Es
+    exactamente como el Excel histórico terminó con 5 series que cobran y no
+    existen en la base.
+  - El modal muestra un panel de **novedades** (altas, bajas, meses parciales,
+    series con varios tramos, pañol excluidos). No corrige nada solo: lo pone
+    adelante para que se revise antes de emitir.
+  - **El bloque define su propio `rcEsc()` y eso no es cosmético:** adentro del
+    IIFE de Indicadores, `esc()` es la versión que escapa **solo comillas
+    dobles**; la buena del CRM queda tapada. Los nombres de cliente vienen del
+    Excel de Tango, así que no son de confianza. Usar `esc()` ahí sería XSS.
+  - **Única función existente que se tocó:** `setModelo()`, que suma una llamada
+    a `rcToggle()` dentro de un `try/catch` para mostrar u ocultar el botón.
+    El resto es todo agregado: 737 líneas insertadas, 0 borradas.
 - **Duplicar cotización**: copia una OE en una oferta nueva (número propio,
   versión 01). Distinto de "Nueva versión". No hereda fecha de envío, carpeta
   de SharePoint ni la oportunidad de origen (copiar `fromOppId` le robaría la
@@ -269,6 +363,55 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
 
 - `COD_GVA23` de Victoria López Aybar en Tango: falta dar de alta como vendedora.
 - Config `lista_precios_dolar_billete`: falta completar el número de lista de Tango.
+- **Diferencias entre el Excel del técnico de reefers y la base** (salieron de
+  cruzar las 33 hojas contra producción, 4/11/2026). El código no necesita
+  cambios: el botón ya las resuelve todas. Lo que queda son decisiones
+  comerciales.
+  - **RESUELTO — 5 series que la planilla factura y no existen en
+    `ind_rental_data`** (confirmado por Ignacio, 4/11/2026). Ninguna debe
+    facturar, y el botón ya las excluye porque no están en `ind_rental_data`.
+    Siguieron facturando hasta septiembre 2026 con estas fechas de salida:
+
+    | serie | salió | facturó desde | meses | días | USD |
+    |---|---|---|---:|---:|---:|
+    | `SCXU 492781-3` | 01/09/2023 (subalquiler devuelto) | 01/2024 | 33 | 1.004 | 3.833 |
+    | `TOLU 780207-8` | 02/01/2025 | 01/2025 | 21 | 638 | 2.552 |
+    | `FSCU 560476-4` | 02/01/2025 | 01/2025 | 21 | 638 | 2.552 |
+    | `SUDU 475338-3` | 02/01/2025 | 01/2025 | 21 | 638 | 2.552 |
+    | `CRLU 110562-4` | 02/01/2025 | 01/2025 | 21 | 638 | 2.552 |
+    | | | | | **3.556** | **14.041** |
+
+    Las fechas son `dd/mm/aaaa`, confirmado por Ignacio. El `SCXU` salió
+    **antes de que empezara la planilla** y se facturó los 33 meses enteros.
+
+    **`TOLU 780207-8` y `TOLU 780208-3` son dos contenedores distintos**, no
+    una serie mal escrita: el `780208-3` sigue alquilado a BAMBOO y factura
+    bien; el `780207-8` se vendió el 2/1/2025 y siguió facturando 21 meses.
+    Durante el análisis se había planteado que uno duplicaba al otro porque las
+    dos facturan los mismos días todos los meses — **eso no prueba nada**:
+    44 de las 74 series del archivo hacen lo mismo porque están alquiladas de
+    forma continua. Vale como recordatorio de que en esta flota la continuidad
+    es la norma, no una anomalía.
+  - **ABIERTO — 3 que la planilla factura y la base tiene en stock**:
+    `CRLU 726949-8`, `SUDU 475651-0`, `ZCSU 511065-4`. En septiembre 2026
+    cobran mes completo, y ese mes no tuvo ningún tramo parcial.
+  - **ABIERTO — 4 alquiladas a las que la planilla no les puso días**:
+    `CCLU 859877-6`, `CCLU 860139-7`, `CXRU 118045-3`, `SUDU 475293-6`.
+  - **`ZCSU 511065-4` está duplicada en 15 hojas seguidas** (07-2025 a 09-2026):
+    455 días de más, 1.820 USD. El botón la cuenta una sola vez. Este sí es un
+    duplicado confirmado: la misma serie aparece dos veces en la misma hoja.
+  - **Julio 2025 se pagó de menos**: la fórmula del total de esa hoja arranca en
+    `F11` en vez de `F4` y se comió el bloque de 20 pies. 93 días = 372 USD
+    (al TC 1375 de esa hoja, ARS 511.500). Es la única hoja de 33 con el rango
+    mal.
+  - **Conciliación de septiembre 2026, exacta**: planilla 57 filas (1.710 días);
+    −5 fuera de la flota, −1 fila repetida, −3 que la base tiene en stock,
+    +4 alquilados sin días = **52 contenedores, 1.560 días**, que es justo lo
+    que da el botón.
+  - **Acumulado**: 14.041 USD facturados después de la salida + 1.820 del
+    duplicado de ZCSU − 372 que se pagaron de menos en julio 2025 =
+    **15.489 USD de más**, sin contar los 3 en stock ni los 4 sin días, que
+    siguen abiertos.
 - **Pedido draft UI** dentro de cada cobranza — próximo paso grande, requiere
   tocar el `index.html` actual completo.
 - Push de pedidos a Tango vía API (`POST Api/Create/{process}`) una vez exista
