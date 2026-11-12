@@ -328,6 +328,138 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
   - **Única función existente que se tocó:** `setModelo()`, que suma una llamada
     a `rcToggle()` dentro de un `try/catch` para mostrar u ocultar el botón.
     El resto es todo agregado: 737 líneas insertadas, 0 borradas.
+- **Control DTM y Logística** (menú Rental, debajo de Indicadores): audita, por
+  contenedor y por mes, que cada servicio de DTM o de Logística contratado a un
+  proveedor se le haya facturado al cliente, y que haya dado al menos 20 % de
+  markup **sobre el costo**. Reemplaza la auditoría manual que se hacía
+  cruzando a mano los informes de Tango en un Excel.
+  - **El total que trae el pie de los informes de Tango vale el DOBLE.** Cada
+    comprobante aparece dos veces: como fila `02 - EERR` (el total de la cuenta
+    de resultados) y abierto en filas `04 - CONTENEDOR/MODULO`. La fórmula del
+    pie es un `=SUM()` plano que no filtra por nivel, así que suma las dos.
+    Verificado al centavo en los cuatro archivos y en las dos monedas
+    (Ventas DTM: pie −102.670.612, real −51.335.306). **El importador NUNCA
+    divide el pie por dos: suma los `02`.** El factor 2 es una consecuencia de
+    que el desglose esté completo, no una constante: si un día un comprobante
+    viene sin sus `04`, el pie deja de valer el doble, y eso es justamente la
+    señal de que falta algo. Se usa como checksum.
+  - **La clave natural necesita la CUENTA.** `A0001000000384` aparece dos veces
+    con el mismo auxiliar `M00096`: cuenta 41000005 por −2.165.000 (Logística) y
+    41000004 por −650.000 (DTM). Es la factura que vende las dos cosas juntas al
+    mismo contenedor. Con clave `(comprobante, auxiliar)` se pisa y se pierden
+    4.330.000. Las claves son `(origen, proveedor_k, nro_comprobante,
+    cod_cuenta)` y `(comprobante_id, auxiliar, leyenda_k)`; `proveedor_k` y
+    `leyenda_k` son columnas **generadas** (`coalesce(x,'')`) y no expresiones,
+    porque PostgREST necesita nombres de columna reales para el `on_conflict`
+    del upsert.
+  - **Se clasifica FILA POR FILA por `Cód. cuenta`**, nunca por el nombre del
+    archivo: 55000009 compras LOG, 52000013 compras DTM, 41000005 ventas LOG,
+    41000004 ventas DTM. Por eso hay un solo botón de importar y no cuatro
+    ranuras: "subí el archivo equivocado" no existe por construcción. Una cuenta
+    desconocida **no se descarta en silencio**, entra en los avisos.
+  - **Las columnas se mapean por NOMBRE, nunca por posición.** El orden ya
+    difiere entre compras y ventas, y hasta cambia el nombre de la columna de
+    fecha (`Fecha contable` contra `Fecha de emisión`).
+  - **`cstNum()` (`index.html:5700`) NO se puede reusar:** lee `'1.380.000,00'`
+    como **1,38**, porque borra la coma decimal y deja los puntos de miles. No
+    tira excepción. El bloque define su propio `dtmNum()`, que devuelve **NaN**
+    para lo que no entiende, nunca 0: un cero silencioso en una columna de costo
+    hace que el control diga que todo da ganancia.
+  - **Las fechas no se leen con `v instanceof Date` + `toISOString()`.** Es el
+    mismo bug de huso que ya está documentado para la escritura, pero al leer:
+    con `cellDates:true` y TZ de Buenos Aires el 09/10/2026 vuelve como
+    `2026-10-09T03:00:48Z` (el offset CMT −4:16:48) y al **este** de Greenwich
+    `slice(0,10)` da el día anterior. Se lee con `XLSX.SSF.parse_date_code`.
+    Comprobado: reintroducir el bug a propósito hace fallar la suite en Auckland
+    y en Kolkata, **y no en UTC ni en Buenos Aires** — o sea que una prueba que
+    corra solo en el contenedor lo deja pasar.
+  - **El bloque vive FUERA del IIFE de Indicadores, en su propio `<script>`.**
+    Adentro, `esc()` es la versión que escapa solo comillas dobles; los nombres
+    de proveedor vienen del Excel de Tango, así que sería XSS almacenado. Y hay
+    una razón más: el `MutationObserver` de `habilitarResizeColumnas` observa
+    `#content` y nada más, así que una vista en contenedor propio se quedaría
+    sin columnas redimensionables (el estándar de tablas las exige).
+  - **Escribe con `sbClient.from()`, no con `sbFetch`.** `sbFetch` tiene el
+    guard de edición por sección (`index.html:1282`) que rebota los métodos
+    distintos de GET si la vista no está en el array `editar` del usuario. Esta
+    sección no se gobierna por los permisos del CRM sino por
+    **`ind_dtmlog_editores`**, mismo patrón que `ind_editores`. Por eso también
+    está en `SECCIONES_REPORTE_COM` (para que no salga el cartel amarillo de
+    solo lectura) y en el early-return de `comPuedeVer()`.
+  - **El markup por contenedor es un ARTEFACTO cuando el comprobante toca
+    varios.** El comprobante de venta `A0000500007807` (9.180.000) Tango lo abre
+    en **cuatro filas idénticas de 2.295.000**; la auditoría manual del mismo
+    servicio reparte 2.800.000 / 1.690.000 / 1.690.000 / 3.000.000. El veredicto
+    de markup se da vuelta en 2 de los 4. Por eso el markup se calcula al nivel
+    del **cluster** (la componente conexa del grafo contenedor–comprobante
+    dentro del período, con una CTE recursiva) y el por-contenedor se deja en
+    NULL. Un cluster nunca sale en rojo: sale en ámbar.
+  - **EL PUNTO MÁS IMPORTANTE, y el que puede cambiar la feature entera: el
+    export de compras de Tango trae el 26,7 % del costo.** Octubre 2026 ya está
+    auditado a mano en `ind_dtm_data`: costo 38.206.900,21, facturación
+    49.385.306,00. El export de **ventas** reproduce esa facturación **al peso**
+    (diferencia 0,00); el de **compras** trae 10.190.380,61 de los 38,2 M. Son
+    los mismos servicios, no dos universos. Consecuencia medida: el cluster de
+    octubre da **+256,9 % con el costo del export y +19,5 % con el costo real**,
+    o sea OK contra *por debajo del mínimo*. `AMFU 848078-5` da +20,7 % y
+    +18,8 %. **El export solo no es impreciso: da vuelta el veredicto.** Por eso
+    las dos fuentes conviven (decisión D1): la vista expone `markup_manual`,
+    `markup_cluster_manual`, `cobertura_costo` y la bandera `alerta_manual`, y
+    la pantalla muestra las dos columnas una al lado de la otra.
+  - **Los códigos de contenedor se unifican automáticamente.** El CRM escribe
+    `IF 4252-04` y Tango `IF 04252-4`: es el mismo trailer. La regla (idéntica
+    en SQL y en JS) es mayúsculas, espacios colapsados y cada corrida de dígitos
+    sin ceros a la izquierda. `IF 04252-11` queda distinto. Dos series ISO de 6
+    dígitos no pueden colisionar (si una pierde un cero queda más corta), y
+    contra las 65 series reales que hay en `index.html` no hay ni una fusión
+    indebida. El resguardo es `ind_dtmlog_v_series_unificadas`, que lista toda
+    unificación que juntó más de una escritura, y la pantalla la muestra.
+  - **Justificar y posponer son dos cosas distintas, a propósito.** "Todavía no
+    pasó" se pospone y vuelve solo en una fecha; "esto está explicado" se
+    justifica y vuelve solo si cambia la **huella** del caso (md5 de los
+    comprobantes y los totales redondeados a peso). Si hubiera un solo botón, la
+    gente justificaría cosas que estaba posponiendo. El motivo sale de una lista
+    corta de cinco, para poder medir después cuál se repite y con qué proveedor.
+    `ind_dtmlog_comentarios` es **append-only**: sin update ni delete, ni
+    política ni grant.
+  - **Comentar y justificar tienen permisos DISTINTOS.** Comentar lo puede
+    cualquiera del sector (el que sabe por qué falta un costo suele ser alguien
+    de compras, no el que importa); justificar y posponer **sacan un caso del
+    tablero**, así que exigen estar en `ind_dtmlog_editores`. En los tres casos
+    el RLS obliga a que la nota venga firmada con el mail del JWT.
+  - **La edad de un caso se mide contra la fecha de corte del último informe
+    importado, y cruzando los lados**: una compra sin venta se mide contra hasta
+    dónde llegan las **ventas**. Si se midiera contra `now()`, dos semanas sin
+    importar envejecerían todo el tablero a rojo sin que hubiera pasado nada.
+    Ventanas: 45 días para "compra sin venta" (rojo) y 60 para "venta sin
+    compra" (ámbar, nunca rojo). `ind_dtmlog_v_lag` guarda el lag real de cada
+    par que cierra, para recalibrarlas con el dato propio a los tres meses.
+  - **La baja es lógica, nunca `delete`**, y el CHECK obliga a registrar motivo
+    **y quién**. Las vistas no se materializan: una vista materializada no
+    respeta RLS y además habría que refrescarla.
+  - **La vista de auditoría depende de los permisos de `ind_dtm_data`.** Va con
+    `security_invoker`, así que lee esa tabla con los permisos del usuario. Hoy
+    funciona porque la migración del 2/11 le dio `grant select to authenticated`
+    y política por sector. Si alguna vez se los sacan, el Control DTM entero
+    deja de cargar con un `permission denied for table ind_dtm_data` que no
+    menciona esta vista por ningún lado.
+  - **La migración borra las vistas antes de crearlas.** `create or replace
+    view` no puede renombrar ni reordenar columnas, así que re-correr el archivo
+    con una columna nueva en el medio falla con un error que no dice nada. Las
+    tablas no se tocan: no se pierde un dato.
+  - **Validación.** SQL: PostgreSQL 16 descartable con las 59 filas reales —
+    21 comprobantes y 34 renglones, idempotente en tres cargas, 19 pruebas de
+    permisos (anon no lee nada, el de la lista escribe, el de afuera comenta
+    pero no justifica, sin sector no ve nada), y el rollback no deja ni un
+    objeto. Parser: 128 casos × 4 husos (UTC, Buenos Aires, Auckland, Kolkata),
+    con la verdad de las fechas sacada de openpyxl. Navegador: 68 pruebas con
+    Playwright forzando `timezoneId: 'America/Argentina/Buenos_Aires'`, más 29
+    de regresión sobre lo que ya andaba. Todo en
+    `scratchpad/dtm/` (fuera del repo).
+  - **Lo único que se tocó de lo existente son 2 líneas**: `comPuedeVer()`
+    (`index.html:1842`, sumar `'ctrl_dtm'` al early-return, mismo patrón que
+    `'indicadores'`) y `SECCIONES_REPORTE_COM` (`index.html:1833`). El resto son
+    1.045 líneas agregadas, 0 borradas.
 - **Duplicar cotización**: copia una OE en una oferta nueva (número propio,
   versión 01). Distinto de "Nueva versión". No hereda fecha de envío, carpeta
   de SharePoint ni la oportunidad de origen (copiar `fromOppId` le robaría la
@@ -360,6 +492,29 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
 - Consistencia visual entre dashboards Rental y Ventas.
 
 ## Pendientes conocidos
+
+- **Control DTM — LA PREGUNTA QUE HAY QUE RESPONDER PRIMERO**: ¿el costo de
+  octubre aparece en el informe de **compras de noviembre**? De eso depende si
+  la brecha del 73 % es un desfasaje contable (y entonces la ventana de gracia
+  lo resuelve, y con el tiempo el export solo alcanza) o si el costo que usa la
+  auditoría manual sale de las OC y no de la contabilidad (y entonces el export
+  **nunca** va a servir para calcular margen y hay que replantear). Se responde
+  pidiéndole a Ignacio los cuatro informes de un mes completo.
+- **Control DTM — falta la columna de cliente en el informe de ventas de
+  Tango.** El de compras ya trae `Proveedor`; el de ventas no trae su
+  equivalente. Es la misma familia de consulta, o sea que es un campo que falta
+  en la consulta compartida, no un dato inexistente. Mientras tanto el cliente
+  no se deriva: se muestra vacío, porque un nombre equivocado con cara de dato
+  cierto es peor que un casillero vacío en una pantalla que se usa para
+  reclamarle a compras o a un cliente.
+- **Avisarle a Administración que el total del pie de esos cuatro informes de
+  Tango vale el doble del movimiento real.** Si alguien lo está leyendo como
+  total, está leyendo el doble.
+- **Caso concreto de imputación cruzada, para revisar con compras**: comprobante
+  `A0002000000834` de OFIC3 del 23/10. Tango le asigna 1.082.000 a
+  `GSTU 718552-9` y 810.000 a `IF 03061-2`; la auditoría manual los tiene al
+  revés. Los mismos dos importes, intercambiados entre los mismos dos
+  contenedores.
 
 - `COD_GVA23` de Victoria López Aybar en Tango: falta dar de alta como vendedora.
 - Config `lista_precios_dolar_billete`: falta completar el número de lista de Tango.
