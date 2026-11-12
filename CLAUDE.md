@@ -141,6 +141,19 @@ Reemplaza procesos manuales y se conecta con el ERP **Tango Delta 5 (Axoft)**.
   Rental y Panel (ver commits 7f4696e/9311d0a). Para tablas que mezclan filas de
   oportunidad y de cotización, pasar un `valFn` a `xlfPass` para las OP (solo las
   columnas que comparten).
+  **Techo práctico: 10 columnas.** `table.grid th, td{overflow:hidden}` +
+  `text-overflow:ellipsis` (líneas 90-91) lo comparten TODAS las tablas, así que
+  pasado ese ancho los importes salen cortados con puntos suspensivos y no hay
+  forma de arreglarlo sin tocar una regla que usa toda la app. Panel tiene 8,
+  Rental y Ventas 10. Control DTM arrancó con 11 y hubo que juntar dos columnas
+  en una (los dos markup, uno arriba del otro). Si una tabla nueva necesita más
+  de 10, apilar dos datos en una celda antes que agregar la columna.
+- **Valores largos adentro de un `display:flex`:** un hijo de flex NO baja de su
+  ancho de contenido salvo que lleve `min-width:0`. Sin eso, una lista de cuatro
+  números de comprobante se desborda del contenedor y pisa lo que haya atrás.
+  Pasó en el modal de detalle de Control DTM. Para listas de identificadores
+  conviene apilarlos (uno por renglón) en vez de separarlos por comas: no se
+  parten por la mitad y se leen mejor.
 - **Power Automate:** los triggers HTTP del tenant requieren OAuth; se usa la
   URL firmada del Teams Workflow (`COBRANZA_WEBHOOK_URL`), que acepta POST
   anónimo sin problemas de CORS.
