@@ -7993,8 +7993,11 @@ function dtmTabla(){
     + sortFilterTh('Servicio','servicio','dtmSort',V,'dtmx','servicio')
     + sortTh('Costo','costo','dtmSort',V,'r')
     + sortTh('Facturado','fact','dtmSort',V,'r')
+    // Los dos markup van en UNA columna, uno arriba del otro. Con columnas
+    // separadas la tabla llegaba a 11 — la más ancha de la app, contra 10 de
+    // Rental y Ventas — y el `text-overflow:ellipsis` que comparten todas las
+    // tablas (línea 91) cortaba los importes con puntos suspensivos.
     + sortTh('Markup','markup','dtmSort',V,'r')
-    + '<th class="r">Markup real</th>'
     + sortFilterTh('Estado','estado','dtmSort',V,'dtmx','estado')
     + sortFilterTh('Proveedor','proveedor','dtmSort',V,'dtmx','proveedor')
     + '<th class="nowrap"></th>'
@@ -8025,8 +8028,11 @@ function dtmFila(r){
     + '<td class="nowrap">' + esc(dtmServicio(r)) + '</td>'
     + '<td class="r nowrap">' + dtmPlata(+r.costo_ars) + '</td>'
     + '<td class="r nowrap">' + dtmPlata(+r.fact_ars) + '</td>'
-    + '<td class="r nowrap" style="font-weight:700;color:' + (mk == null ? 'var(--muted)' : (bajo ? '#8E3C34' : '#4A6239')) + '">' + dtmPct(mk == null ? null : +mk) + '</td>'
-    + '<td class="r nowrap" style="font-weight:700;color:' + (mkReal == null ? 'var(--muted)' : (bajoReal ? '#8E3C34' : '#4A6239')) + '" title="El mismo markup pero con el costo que tiene cargado la auditoría manual (tab DTM de Indicadores), que hoy conoce más costo que el informe de Tango.">' + dtmPct(mkReal == null ? null : +mkReal) + '</td>'
+    + '<td class="r nowrap">'
+      + '<div style="font-weight:700;color:' + (mk == null ? 'var(--muted)' : (bajo ? '#8E3C34' : '#4A6239')) + '" title="Markup calculado con el costo que trae el informe de Tango.">' + dtmPct(mk == null ? null : +mk) + '</div>'
+      + (mkReal == null ? ''
+          : '<div style="font-size:11px;font-weight:700;margin-top:2px;color:' + (bajoReal ? '#8E3C34' : '#4A6239') + '" title="El mismo markup pero con el costo que tiene cargado la auditoría manual (tab DTM de Indicadores), que hoy conoce más costo que el informe de Tango.">' + dtmPct(+mkReal) + ' <span style="font-weight:600;color:var(--muted)">real</span></div>')
+      + '</td>'
     + '<td>' + dtmBadge(r.estado) + (r.alerta_manual ? ' <span title="Con el costo que conoce la auditoría manual no llega al mínimo, aunque con el costo del informe de Tango sí." style="display:inline-block;margin-left:4px;padding:1px 6px;border-radius:999px;border:1px solid #E9D8B0;background:#FCF4E6;color:#8A6D1F;font-size:10px;font-weight:800">con el costo real, no</span>' : '')
       + (notas.length ? '<div style="font-size:10.5px;margin-top:3px;display:flex;flex-wrap:wrap;gap:6px">' + notas.join('') + '</div>' : '') + '</td>'
     + '<td>' + (provs.length ? esc(provs.join(', ')) : '<span class="help">—</span>') + '</td>'
@@ -8084,21 +8090,39 @@ function dtmAbrirCaso(caso){
   var rev = dtmRevision(r), grupo = (+r.cluster_n || 1) > 1, min = +DTMLOG.cfg.markup_minimo;
   var mk = grupo ? r.markup_cluster : r.markup;
   var mkReal = grupo ? r.markup_cluster_manual : r.markup_manual;
-  var fila = function(l, v){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0"><span style="color:var(--muted)">' + l + '</span><strong>' + v + '</strong></div>'; };
+  // El valor tiene que poder achicarse y cortarse: una lista de cuatro números
+  // de comprobante no entra en media columna, y sin `min-width:0` un hijo de
+  // flex no baja de su ancho de contenido, así que se desbordaba del modal.
+  var fila = function(l, v){
+    return '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:3px 0">'
+      + '<span style="color:var(--muted);flex:0 0 auto">' + l + '</span>'
+      + '<strong style="min-width:0;text-align:right;overflow-wrap:anywhere">' + v + '</strong></div>';
+  };
+  // Los comprobantes son identificadores, no prosa: uno por renglón se lee
+  // mucho mejor que cuatro separados por comas que se parten por la mitad.
+  var filaLista = function(l, arr){
+    var a = (arr || []).filter(Boolean);
+    return '<div style="padding:3px 0">'
+      + '<div style="color:var(--muted)">' + l + '</div>'
+      + '<div style="font-weight:700;overflow-wrap:anywhere;line-height:1.45">'
+      + (a.length ? a.map(function(x){ return esc(x); }).join('<br>') : '—') + '</div></div>';
+  };
 
-  var resumen = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">'
+  // `auto-fit` en vez de `1fr 1fr`: en una pantalla angosta las dos columnas se
+  // apilan en vez de apretarse hasta desbordar.
+  var resumen = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px">'
     + '<div><div style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:6px">Costo contratado</div>'
     +   fila('Según Tango', dtmPlata(+r.costo_ars))
-    +   ((+r.costo_dtm || +r.costo_log) ? fila('DTM / Logística', dtmPlata(+r.costo_dtm) + ' / ' + dtmPlata(+r.costo_log)) : '')
+    +   ((+r.costo_dtm && +r.costo_log) ? (fila('DTM', dtmPlata(+r.costo_dtm)) + fila('Logística', dtmPlata(+r.costo_log))) : '')
     +   (r.costo_manual != null ? fila('<span title="Lo que tiene cargado la auditoría manual (tab DTM de Indicadores) para el mismo contenedor y mes.">Auditoría manual</span>', dtmPlata(+r.costo_manual)) : '')
-    +   fila('Comprobantes', esc((r.comprobantes_compra || []).join(', ') || '—'))
-    +   fila('Proveedores', esc((r.proveedores || []).join(', ') || '—'))
+    +   filaLista('Comprobantes', r.comprobantes_compra)
+    +   filaLista('Proveedores', r.proveedores)
     + '</div>'
     + '<div><div style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:6px">Facturado al cliente</div>'
     +   fila('Según Tango', dtmPlata(+r.fact_ars))
-    +   ((+r.fact_dtm || +r.fact_log) ? fila('DTM / Logística', dtmPlata(+r.fact_dtm) + ' / ' + dtmPlata(+r.fact_log)) : '')
+    +   ((+r.fact_dtm && +r.fact_log) ? (fila('DTM', dtmPlata(+r.fact_dtm)) + fila('Logística', dtmPlata(+r.fact_log))) : '')
     +   (r.fact_manual != null ? fila('Auditoría manual', dtmPlata(+r.fact_manual)) : '')
-    +   fila('Comprobantes', esc((r.comprobantes_venta || []).join(', ') || '—'))
+    +   filaLista('Comprobantes', r.comprobantes_venta)
     + '</div></div>';
 
   var ver = '<div style="margin-top:14px;border:1px solid var(--line);border-radius:10px;padding:12px">'
@@ -8457,7 +8481,7 @@ const sb = sbClient;
 // Sube de a uno en cada publicación, igual que el caché del service worker.
 // Se muestra abajo de todo en Datos para poder confirmar qué versión se está
 // viendo sin tener que adivinar si el navegador quedó con una copia vieja.
-const APP_VER=34;
+const APP_VER=35;
 
 const DTM_SEED=[
   {mes:'2026-01',serie:'FSCU 402701-4',modelo:'NQ MODULOS',tipo:'DTM',desc:'Reparación cerradura e instalación termotanque',costo:764099.0,fact:648000.0},
