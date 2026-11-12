@@ -757,6 +757,10 @@ textarea.inp{resize:vertical;min-height:60px;}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
         Indicadores
       </button>
+      <button class="navbtn" data-view="ctrl_dtm">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13v8H3z"/><path d="M16 10h3.5l1.5 3v2H16z"/><circle cx="7" cy="18" r="1.8"/><circle cx="18" cy="18" r="1.8"/></svg>
+        Control DTM y Logística
+      </button>
       <div class="nav-group-lbl">Ventas</div>
       <button class="navbtn" data-view="dashboard_ventas">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
@@ -1830,7 +1834,13 @@ document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>go(b.dataset.view)
 // Sin config guardada = acceso total (retrocompatible; hoy todo interno logueado
 // ve y edita todo). Dirección ve/edita todo. 'lector' no edita.
 let _perfilCom = null; // { esDir, rol, ver, editar } | null
-const SECCIONES_REPORTE_COM = new Set(['dashboard','dashboard_ventas','audit','cierres','indicadores']); // sin edición → sin cartel
+// 'ctrl_dtm' va en esta lista aunque SÍ se escriba desde ahí: su permiso de
+// edición no lo decide `permisos.editar` del CRM sino la tabla propia
+// `ind_dtmlog_editores` (igual que Indicadores con `ind_editores`). Si no
+// estuviera acá, a quien no tenga 'ctrl_dtm' en su array `editar` le saldría el
+// cartel amarillo de "solo lectura" aunque sí pueda importar, que es peor que
+// no mostrar nada. La guarda de verdad es el RLS.
+const SECCIONES_REPORTE_COM = new Set(['dashboard','dashboard_ventas','audit','cierres','indicadores','ctrl_dtm']); // sin edición → sin cartel
 function _comVerSet(){ if(!_perfilCom||_perfilCom.esDir) return null; if(Array.isArray(_perfilCom.ver)) return new Set(_perfilCom.ver); return null; }
 function _comEditSet(){ if(!_perfilCom||_perfilCom.esDir) return null; if(_perfilCom.rol==='lector'||_perfilCom.rol==='lectura') return new Set(); if(Array.isArray(_perfilCom.editar)) return new Set(_perfilCom.editar); return null; }
 // 'indicadores' se exceptúa del array `ver`: es una sección que se agregó
@@ -1839,7 +1849,10 @@ function _comEditSet(){ if(!_perfilCom||_perfilCom.esDir) return null; if(_perfi
 // tener que reescribir los permisos ya cargados de cada persona. No cambia
 // nada para las secciones que ya existían. Lectura no es un problema: el RLS
 // de las tablas ind_ ya deja leer a todo el sector comercial.
-function comPuedeVer(sec){ if(!sec) return true; if(sec==='indicadores') return true; const s=_comVerSet(); return s===null||s.has(sec); }
+// 'ctrl_dtm' (Control DTM y Logística) se exceptúa por el mismo motivo que
+// 'indicadores': se agregó después de que se configuraran los permisos del
+// equipo, no figura en el `ver` de nadie, y el menú lo escondería para todos.
+function comPuedeVer(sec){ if(!sec) return true; if(sec==='indicadores'||sec==='ctrl_dtm') return true; const s=_comVerSet(); return s===null||s.has(sec); }
 function comPuedeEditar(sec){ if(!sec) return true; const s=_comEditSet(); return s===null||s.has(sec); }
 function comEdicionActual(){ return comPuedeEditar(current); }
 async function cargarPerfilComercial(){
@@ -7394,6 +7407,1035 @@ function habilitarResizeColumnas(root){
 })();
 </script>
 <script>
+/* ===================== CONTROL DTM Y LOGÍSTICA =====================
+ * Audita, por contenedor, que cada servicio de DTM o de Logística que se le
+ * contrató a un proveedor se le haya facturado al cliente, y que haya dado al
+ * menos el markup mínimo sobre el costo. Se alimenta de los cuatro informes
+ * que exporta Tango, más carga manual para lo que todavía no está
+ * contabilizado.
+ *
+ * POR QUÉ ESTE BLOQUE VIVE ACÁ Y NO ADENTRO DEL IIFE DE INDICADORES
+ * ----------------------------------------------------------------
+ * Tres razones concretas, ninguna cosmética:
+ *  1. Adentro de ese IIFE, `esc()` es la versión que escapa SOLO comillas
+ *     dobles. Los nombres de proveedor y de cliente vienen del Excel de Tango,
+ *     o sea que no son de confianza: usarlos con ese `esc()` sería XSS
+ *     almacenado. Acá afuera, `esc()` es el bueno del CRM (escapa & < > ").
+ *  2. El MutationObserver de `habilitarResizeColumnas` observa `#content` y
+ *     nada más. Un contenedor hermano no recibe columnas redimensionables, y
+ *     el estándar de tablas del proyecto las exige.
+ *  3. El estado de esta vista vive en la base, no en memoria. La razón que
+ *     justificó el contenedor propio de Indicadores (no perder los gráficos de
+ *     Chart.js al cambiar de vista) acá no aplica.
+ *
+ * POR QUÉ ESCRIBE CON sbClient Y NO CON sbFetch
+ * ---------------------------------------------
+ * `sbFetch` tiene un guard de edición por sección: rebota cualquier método
+ * distinto de GET si la vista actual no figura en el array `editar` del
+ * usuario. Esta sección NO se gobierna por los permisos del CRM: se gobierna
+ * por `ind_dtmlog_editores`, igual que la carga de datos de Indicadores se
+ * gobierna por `ind_editores`. Escribir con `sbClient.from()` es el mismo
+ * camino que ya usa Indicadores, y deja que el RLS —que pregunta por la misma
+ * función que pregunta el botón— sea la única autoridad.
+ * ==================================================================== */
+
+/* ---------------- Parser de los informes de Tango ----------------
+ * Tres funciones que NO se pueden reemplazar por las que ya existen:
+ *   - dtmNum   porque cstNum() (más arriba en este archivo) lee '1.380.000,00'
+ *              como 1,38: borra la coma decimal y deja los puntos de miles.
+ *              No tira excepción, así que el control diría que todo da
+ *              ganancia.
+ *   - dtmFecha porque leer la celda como Date y hacer toISOString() corre el
+ *              día según el huso del navegador.
+ *   - dtmNormSerie porque no existe nada equivalente.
+ * ------------------------------------------------------------------ */
+
+/* Las cuatro cuentas del circuito. La cuenta es el dato AUTORITATIVO: dice de
+   qué lado está la fila (compra o venta) y de qué servicio es (DTM o
+   Logística). Se clasifica fila por fila, nunca por el nombre del archivo, así
+   "subí el archivo equivocado" no existe por construcción. */
+var DTM_CUENTAS = {
+  '55000009': { origen:'compras', categoria:'LOG' },
+  '52000013': { origen:'compras', categoria:'DTM' },
+  '41000005': { origen:'ventas',  categoria:'LOG' },
+  '41000004': { origen:'ventas',  categoria:'DTM' }
+};
+
+/* Normaliza un código de contenedor para poder cruzar el CRM con Tango.
+   El CRM escribe 'IF 4252-04' y Tango 'IF 04252-4': es el mismo trailer.
+     1. trim, mayúsculas, espacios internos colapsados a uno
+     2. cada corrida de dígitos pierde sus ceros a la izquierda
+   TIENE que dar exactamente lo mismo que public.ind_dtmlog_norm_serie() en
+   SQL. Si las dos se separan, un renglón cae en un contenedor desde el JS y en
+   otro desde la base, y nada falla. */
+function dtmNormSerie(s){
+  if(s == null) return '';
+  var t = String(s).trim().toUpperCase().replace(/\s+/g, ' ');
+  if(!t) return '';
+  return t.replace(/\d+/g, function(d){ return d.replace(/^0+/, '') || '0'; });
+}
+
+/* Parser de importes propio.
+   Devuelve NaN para lo que no se puede leer, NUNCA 0: un cero silencioso en
+   una columna de costo hace que el control diga que todo da ganancia.
+   Desambiguación: si hay coma Y punto, el último es el decimal; si hay uno
+   solo, es decimal cuando lo siguen 1 o 2 dígitos y aparece una sola vez (con
+   3 dígitos atrás es separador de miles, que es como exporta Tango);
+   '(1.234,00)' es negativo contable; el espacio duro de Excel cuenta como
+   espacio. */
+function dtmNum(v){
+  if(typeof v === 'number') return isFinite(v) ? v : NaN;
+  if(v == null) return NaN;
+  var s = String(v).replace(/ /g, ' ').trim();
+  if(!s || s === '-' || s === '—') return NaN;
+  var neg = false;
+  if(/^\(.*\)$/.test(s)){ neg = true; s = s.slice(1, -1).trim(); }
+  s = s.replace(/[$\s]/g, '').replace(/^ARS|^USD/i, '');
+  if(/-$/.test(s)){ neg = true; s = s.slice(0, -1); }
+  if(/^-/.test(s)){ neg = !neg; s = s.slice(1); }
+  if(/^\+/.test(s)) s = s.slice(1);
+  if(!s || !/^[0-9.,]+$/.test(s)) return NaN;
+  var ultComa = s.lastIndexOf(','), ultPunto = s.lastIndexOf('.'), dec = -1;
+  if(ultComa >= 0 && ultPunto >= 0){
+    dec = Math.max(ultComa, ultPunto);
+  }else if(ultComa >= 0 || ultPunto >= 0){
+    var p = ultComa >= 0 ? ultComa : ultPunto;
+    var veces = s.split(ultComa >= 0 ? ',' : '.').length - 1;
+    var atras = s.length - p - 1;
+    if(veces === 1 && (atras === 1 || atras === 2)) dec = p;
+  }
+  var ent = dec >= 0 ? s.slice(0, dec) : s;
+  var frac = dec >= 0 ? s.slice(dec + 1) : '';
+  ent = ent.replace(/[.,]/g, '');
+  if(/[.,]/.test(frac) || !/^\d*$/.test(ent) || !/^\d*$/.test(frac)) return NaN;
+  if(!ent && !frac) return NaN;
+  var n = parseFloat((ent || '0') + (frac ? '.' + frac : ''));
+  if(!isFinite(n)) return NaN;
+  return neg ? -n : n;
+}
+
+/* Lee una fecha de celda y devuelve 'YYYY-MM-DD', o null.
+   CLAUDE.md documenta que ESCRIBIR un Date por SheetJS corre el día según el
+   huso del navegador. Al LEER pasa lo mismo al revés: con cellDates:true y
+   TZ=America/Argentina/Buenos_Aires el 09/10/2026 vuelve como
+   2026-10-09T03:00:48Z (los :48 son el offset CMT -4:16:48), y al este de
+   Greenwich un toISOString().slice(0,10) da el día ANTERIOR.
+   Por eso: el serial se lee con XLSX.SSF.parse_date_code, y si igual llega un
+   Date se usan los getters LOCALES, nunca toISOString. */
+function dtmFecha(v, XLSXref){
+  if(v == null || v === '') return null;
+  var X = XLSXref || (typeof XLSX !== 'undefined' ? XLSX : null);
+  if(typeof v === 'number' && isFinite(v)){
+    if(X && X.SSF && X.SSF.parse_date_code){
+      var d = X.SSF.parse_date_code(v);
+      if(d && d.y) return dtmYMD(d.y, d.m, d.d);
+    }
+    var u = new Date(Math.round((v - 25569) * 86400000));
+    if(!isNaN(u.getTime())) return dtmYMD(u.getUTCFullYear(), u.getUTCMonth()+1, u.getUTCDate());
+    return null;
+  }
+  if(v instanceof Date){
+    if(isNaN(v.getTime())) return null;
+    return dtmYMD(v.getFullYear(), v.getMonth()+1, v.getDate());
+  }
+  var s = String(v).trim(), m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if(m) return dtmYMD(+m[1], +m[2], +m[3]);
+  m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/.exec(s);
+  if(m){ var a = +m[3]; if(a < 100) a += 2000; return dtmYMD(a, +m[2], +m[1]); }
+  return null;
+}
+function dtmYMD(y, m, d){
+  if(!y || !m || !d || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+}
+
+/* Las columnas se mapean POR NOMBRE, nunca por posición: el orden ya difiere
+   entre compras y ventas, y hasta cambia el nombre de la columna de fecha
+   ('Fecha contable' en compras, 'Fecha de emisión' en ventas). */
+function dtmClave(s){
+  return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+var DTM_COLS = {
+  tipo_auxiliar:['tipodeauxiliar','tipoauxiliar'], auxiliar:['auxiliar','codauxiliar','codigoauxiliar'],
+  serie:['descauxiliar','descripcionauxiliar'], leyenda:['leyenda'],
+  fecha:['fechacontable','fechadeemision','fechaemision','fecha'],
+  tipo_cbte:['tipocomprobante','tipodecomprobante','tipocbte'],
+  nro_cbte:['nrocomprobante','numerocomprobante','nrocbte','numcomprobante'],
+  proveedor:['proveedor','razonsocial'], cod_cuenta:['codcuenta','codigocuenta','cuenta'],
+  desc_cuenta:['desccuenta','descripcioncuenta'], cte:['saldocte','saldoc','importecte'],
+  ext:['saldoext','saldoe','importeext']
+};
+function dtmMapear(encabezado){
+  var mapa = {}, i, c, j;
+  for(i = 0; i < encabezado.length; i++){
+    var k = dtmClave(encabezado[i]); if(!k) continue;
+    for(c in DTM_COLS){
+      if(!Object.prototype.hasOwnProperty.call(DTM_COLS, c) || mapa[c] != null) continue;
+      for(j = 0; j < DTM_COLS[c].length; j++) if(k === DTM_COLS[c][j]){ mapa[c] = i; break; }
+    }
+  }
+  return mapa;
+}
+
+/* Parsea un workbook ya leído. Nunca tira: devuelve {ok:false, error} para que
+   el que llama pueda mostrar el problema en vez de comerse una excepción. */
+function dtmParse(wb, XLSXref, nombreArchivo){
+  var X = XLSXref || (typeof XLSX !== 'undefined' ? XLSX : null);
+  var out = { ok:false, error:null, archivo:nombreArchivo || '(sin nombre)',
+              importaciones:[], comprobantes:[], renglones:[], unificaciones:[], avisos:[] };
+  if(!X || !X.utils){ out.error = 'Falta la librería XLSX.'; return out; }
+  if(!wb || !wb.SheetNames || !wb.SheetNames.length){ out.error = 'El archivo no tiene ninguna hoja.'; return out; }
+  var filas = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:true, defval:null, blankrows:false });
+  if(!filas.length){ out.error = 'La hoja está vacía.'; return out; }
+
+  // El encabezado es la primera fila que tenga "Tipo de auxiliar": buscarla en
+  // vez de asumir la fila 1 tolera un título arriba de todo.
+  var iEnc = -1, mapa = null;
+  for(var i = 0; i < Math.min(filas.length, 15); i++){
+    var m = dtmMapear(filas[i] || []);
+    if(m.tipo_auxiliar != null && m.nro_cbte != null && m.cod_cuenta != null){ iEnc = i; mapa = m; break; }
+  }
+  if(iEnc < 0){ out.error = 'No encontré el encabezado del informe (falta "Tipo de auxiliar", "Nro. comprobante" o "Cód. cuenta"). ¿Es un informe de mayor por auxiliar de Tango?'; return out; }
+  if(mapa.cte == null){ out.error = 'No encontré la columna de importe ("Saldo (CTE)").'; return out; }
+
+  var leer = function(f, c){ return (mapa[c] == null || f[mapa[c]] == null) ? null : f[mapa[c]]; };
+  var cbtes = {}, orden = [], pie = { cte:0, hay:false }, n02 = 0, n04 = 0, s02 = 0, s04 = 0, porSerie = {};
+
+  for(var r = iEnc + 1; r < filas.length; r++){
+    var f = filas[r] || [];
+    if(!f.some(function(x){ return x != null && String(x).trim() !== ''; })) continue;
+    var tipo = String(leer(f, 'tipo_auxiliar') || '').trim();
+    var nivel = tipo.indexOf('02') === 0 ? '02' : (tipo.indexOf('04') === 0 ? '04' : null);
+
+    if(!nivel){
+      // La fila sin "Tipo de auxiliar" es el pie. OJO: ese total vale
+      // suma(02) + suma(04), o sea el DOBLE del movimiento real, porque la
+      // fórmula del pie es un =SUM() plano que no filtra por nivel.
+      // NUNCA se divide por dos: se suman los 02.
+      var pc = dtmNum(leer(f, 'cte')); if(!isNaN(pc)){ pie.cte += pc; pie.hay = true; }
+      continue;
+    }
+    var cc = String(leer(f, 'cod_cuenta') == null ? '' : leer(f, 'cod_cuenta')).trim();
+    var cuenta = DTM_CUENTAS[cc];
+    if(!cuenta){
+      // Una cuenta desconocida NO se descarta en silencio: la fila se pierde y
+      // los totales dejan de cerrar sin que nadie se entere.
+      out.avisos.push('Fila ' + (r+1) + ': cuenta "' + (cc || '(vacía)') + '" desconocida, la dejo afuera. Si contabilidad abrió una cuenta nueva hay que agregarla al control.');
+      continue;
+    }
+    var cte = dtmNum(leer(f, 'cte'));
+    if(isNaN(cte)){ out.avisos.push('Fila ' + (r+1) + ': no pude leer el importe "' + String(leer(f,'cte')) + '", la dejo afuera.'); continue; }
+    var ext = dtmNum(leer(f, 'ext')); if(isNaN(ext)) ext = null;
+    var fecha = dtmFecha(leer(f, 'fecha'), X);
+    var nro = String(leer(f, 'nro_cbte') == null ? '' : leer(f, 'nro_cbte')).trim();
+    if(!nro){ out.avisos.push('Fila ' + (r+1) + ': sin número de comprobante, la dejo afuera.'); continue; }
+    var prov = leer(f, 'proveedor'); prov = prov == null ? null : (String(prov).trim() || null);
+    var clave = cuenta.origen + '|' + (prov || '') + '|' + nro + '|' + cc;
+
+    if(nivel === '02'){
+      n02++; s02 += cte;
+      if(!cbtes[clave]){
+        orden.push(clave);
+        cbtes[clave] = { origen:cuenta.origen, categoria:cuenta.categoria, cod_cuenta:cc,
+          desc_cuenta: leer(f,'desc_cuenta') == null ? null : String(leer(f,'desc_cuenta')).trim(),
+          proveedor: prov, tipo_comprobante: leer(f,'tipo_cbte') == null ? null : String(leer(f,'tipo_cbte')).trim(),
+          nro_comprobante: nro, fecha: fecha, periodo: fecha ? fecha.slice(0,7) : null,
+          total_cte: 0, total_ext: 0 };
+      }
+      cbtes[clave].total_cte += cte;
+      if(ext != null) cbtes[clave].total_ext += ext;
+      if(!cbtes[clave].fecha && fecha){ cbtes[clave].fecha = fecha; cbtes[clave].periodo = fecha.slice(0,7); }
+    }else{
+      n04++; s04 += cte;
+      var serieRaw = leer(f, 'serie'); serieRaw = serieRaw == null ? '' : String(serieRaw).trim();
+      var norm = dtmNormSerie(serieRaw);
+      if(!norm){ out.avisos.push('Fila ' + (r+1) + ': el desglose no dice a qué contenedor corresponde, la dejo afuera.'); continue; }
+      (porSerie[norm] || (porSerie[norm] = {}))[serieRaw] = true;
+      out.renglones.push({ _clave_cbte:clave, nro_comprobante:nro, cod_cuenta:cc,
+        origen:cuenta.origen, categoria:cuenta.categoria, proveedor:prov,
+        auxiliar: leer(f,'auxiliar') == null ? null : String(leer(f,'auxiliar')).trim(),
+        serie_raw:serieRaw, serie_norm:norm,
+        leyenda: leer(f,'leyenda') == null ? null : String(leer(f,'leyenda')).trim(),
+        importe_cte:cte, importe_ext:ext, fecha:fecha, periodo: fecha ? fecha.slice(0,7) : null });
+    }
+  }
+
+  out.comprobantes = orden.map(function(k){ var o = {}; for(var p in cbtes[k]) o[p] = cbtes[k][p]; o._clave = k; return o; });
+
+  // Un renglón 04 cuyo comprobante 02 no está en el archivo queda huérfano: no
+  // se puede guardar (el padre no existe) y hay que decirlo.
+  var vivos = {}; out.comprobantes.forEach(function(c){ vivos[c._clave] = true; });
+  var huerfanos = out.renglones.filter(function(x){ return !vivos[x._clave_cbte]; });
+  if(huerfanos.length){
+    out.avisos.push(huerfanos.length + ' renglón(es) de desglose sin su fila "02 - EERR" en el archivo (' +
+      huerfanos.slice(0,3).map(function(x){ return x.nro_comprobante; }).join(', ') + '…). No los puedo cargar.');
+    out.renglones = out.renglones.filter(function(x){ return vivos[x._clave_cbte]; });
+  }
+
+  // Una importación por (archivo, cuenta): define la ventana de fechas que
+  // cubrió cada informe, y sin eso no se puede saber hasta dónde llegan los
+  // datos de cada lado.
+  var porCuenta = {};
+  out.comprobantes.forEach(function(c){
+    var e = porCuenta[c.cod_cuenta] || (porCuenta[c.cod_cuenta] = { archivo:out.archivo, origen:c.origen,
+      categoria:c.categoria, cod_cuenta:c.cod_cuenta, desde:null, hasta:null, filas_02:0, filas_04:0, total_real:0 });
+    e.filas_02++; e.total_real += c.total_cte;
+    if(c.fecha){ if(!e.desde || c.fecha < e.desde) e.desde = c.fecha; if(!e.hasta || c.fecha > e.hasta) e.hasta = c.fecha; }
+  });
+  out.renglones.forEach(function(x){ if(porCuenta[x.cod_cuenta]) porCuenta[x.cod_cuenta].filas_04++; });
+  var totalReal = 0;
+  for(var cc2 in porCuenta){
+    if(!Object.prototype.hasOwnProperty.call(porCuenta, cc2)) continue;
+    totalReal += porCuenta[cc2].total_real; out.importaciones.push(porCuenta[cc2]);
+  }
+
+  // El pie como checksum: tiene que valer suma(02) + suma(04). Si no da, al
+  // archivo le falta algo y conviene verlo ANTES de guardar.
+  var esperado = s02 + s04, cuadra = pie.hay ? (Math.abs(pie.cte - esperado) <= 1) : true;
+  out.importaciones.forEach(function(e){ e.total_declarado = pie.hay ? pie.cte : null; e.cuadra = cuadra; });
+  if(pie.hay && !cuadra) out.avisos.push('El total del pie del archivo (' + pie.cte.toFixed(2) + ') no da la suma de sus filas (' + esperado.toFixed(2) + '). Puede faltar un desglose o estar cortado el archivo.');
+  if(!pie.hay && (n02 || n04)) out.avisos.push('El archivo no trae fila de total, así que no pude verificar que esté completo.');
+
+  out.comprobantes.forEach(function(c){
+    var s = 0, hay = false;
+    out.renglones.forEach(function(x){ if(x._clave_cbte === c._clave){ s += x.importe_cte; hay = true; } });
+    c.suma_renglones = s;
+    c.cuadra = hay ? (Math.abs(s - c.total_cte) <= 1) : false;
+    if(!hay) out.avisos.push('El comprobante ' + c.nro_comprobante + ' no está imputado a ningún contenedor.');
+    else if(!c.cuadra) out.avisos.push('El comprobante ' + c.nro_comprobante + ': el desglose suma ' + s.toFixed(2) + ' y el total dice ' + c.total_cte.toFixed(2) + '.');
+  });
+  for(var ns in porSerie){
+    if(!Object.prototype.hasOwnProperty.call(porSerie, ns)) continue;
+    var escr = Object.keys(porSerie[ns]);
+    if(escr.length > 1) out.unificaciones.push({ serie_norm:ns, escrituras:escr });
+  }
+  if(!n02 && !n04){ out.error = 'No encontré ninguna fila de las cuentas del circuito DTM/Logística. ¿Es el informe correcto?'; return out; }
+  out.resumen = { filas_02:n02, filas_04:n04, total_real:totalReal, total_declarado: pie.hay ? pie.cte : null, cuadra:cuadra };
+  out.ok = true;
+  return out;
+}
+
+
+/* ---------------- Estado y presentación de la vista ---------------- */
+var DTM_ESTADOS = {
+  SIN_FACTURAR:    { lbl:'Sin facturar',          tono:'rojo',  orden:1, alerta:true  },
+  MARGEN_BAJO:     { lbl:'Margen bajo',           tono:'rojo',  orden:2, alerta:true  },
+  FALTA_COSTO:     { lbl:'Falta el costo',        tono:'ambar', orden:3, alerta:true  },
+  REPARTO_BAJO:    { lbl:'Grupo · margen bajo',   tono:'ambar', orden:4, alerta:true  },
+  SIN_IMPORTE:     { lbl:'Sin importe',           tono:'ambar', orden:5, alerta:true  },
+  ESPERANDO_VENTA: { lbl:'Esperando la venta',    tono:'gris',  orden:6, alerta:false },
+  ESPERANDO_COSTO: { lbl:'Esperando el costo',    tono:'gris',  orden:7, alerta:false },
+  REPARTO_OK:      { lbl:'Grupo compartido',      tono:'gris',  orden:8, alerta:false },
+  OK:              { lbl:'OK',                    tono:'verde', orden:9, alerta:false }
+};
+var DTM_TONOS = {
+  rojo:  'background:#FBEAE8;border-color:#E3B6B1;color:#8E3C34',
+  ambar: 'background:#FCF4E6;border-color:#E9D8B0;color:#8A6D1F',
+  verde: 'background:#EEF4E8;border-color:#C6D9B4;color:#4A6239',
+  gris:  'background:#F0F0EE;border-color:#DCDCD6;color:#6A6A62'
+};
+var DTM_MOTIVOS = {
+  costo_otro_periodo:       'El costo entró en otro período',
+  imputado_otro_contenedor: 'La OC se imputó a otro contenedor',
+  bonificado:               'Servicio bonificado o de cortesía',
+  error_carga_tango:        'Error de carga en Tango',
+  diferencia_aceptada:      'Diferencia aceptada'
+};
+
+var DTMLOG = { cargado:false, cargando:false, error:'', cfg:null,
+  aud:[], sosp:[], unif:[], imps:[], coment:[], puedeEditar:false,
+  filtroEstado:null, soloAlertas:false, busq:'', previo:null };
+window.dtmSort = { col:'estado', dir:1 };
+
+function dtmPlata(n){ return (n == null || isNaN(n)) ? '—' : '$ ' + fmt(n); }
+function dtmPct(n){
+  if(n == null || isNaN(n)) return '—';
+  return (n > 0 ? '+' : '') + (Math.round(n*10)/10).toLocaleString('es-AR',{minimumFractionDigits:1,maximumFractionDigits:1}) + ' %';
+}
+function dtmBadge(e){
+  var d = DTM_ESTADOS[e] || { lbl:e || '—', tono:'gris' };
+  return '<span style="display:inline-block;padding:2px 9px;border-radius:999px;border:1px solid;font-size:11px;font-weight:700;white-space:nowrap;' + DTM_TONOS[d.tono] + '">' + esc(d.lbl) + '</span>';
+}
+/* El mes va abreviado en la tabla ('oct 2026'): la columna comparte ancho con
+   otras nueve y 'septiembre 2026' se cortaba con puntos suspensivos. */
+function dtmPeriodoLbl(p, largo){
+  if(!p || !/^\d{4}-\d{2}$/.test(p)) return esc(p || '—');
+  var m = MESES[(+p.slice(5,7)) - 1] || '';
+  return (largo ? m : m.slice(0,3)) + ' ' + p.slice(0,4);
+}
+/* El usuario sale del JWT de Azure, no se tipea: es lo que se pidió para que
+   quede asentado quién cargó qué. */
+function dtmUsuario(){
+  if(!AUTH_USER) return '';
+  return AUTH_USER.email || (AUTH_USER.user_metadata && (AUTH_USER.user_metadata.email || AUTH_USER.user_metadata.preferred_username)) || '';
+}
+
+/* Lee una tabla o vista entera paginando de a 1000: PostgREST corta ahí por
+   defecto y no avisa, devuelve las primeras mil como si fueran todas. */
+async function dtmTodo(rel, ordCol, asc){
+  var PASO = 1000, desde = 0, out = [];
+  for(;;){
+    var q = sbClient.from(rel).select('*').range(desde, desde + PASO - 1);
+    if(ordCol) q = q.order(ordCol, { ascending: asc !== false });
+    var res = await q;
+    if(res.error) throw res.error;
+    var filas = res.data || [];
+    out = out.concat(filas);
+    if(filas.length < PASO) break;
+    desde += PASO;
+  }
+  return out;
+}
+
+async function dtmCargar(){
+  DTMLOG.cargando = true; DTMLOG.error = '';
+  try{
+    // El permiso de escritura lo contesta la MISMA función que usa el RLS, así
+    // que el botón y la base no pueden discrepar. Si el RPC falla queda en
+    // false: falla cerrado.
+    try{
+      var pe = await sbClient.rpc('ind_dtmlog_puede_editar');
+      DTMLOG.puedeEditar = !pe.error && pe.data === true;
+    }catch(_){ DTMLOG.puedeEditar = false; }
+
+    var r = await Promise.all([
+      sbClient.from('ind_dtmlog_config').select('*').limit(1),
+      dtmTodo('ind_dtmlog_v_auditoria'),
+      dtmTodo('ind_dtmlog_v_comprobantes_sospechosos'),
+      dtmTodo('ind_dtmlog_v_series_unificadas'),
+      dtmTodo('ind_dtmlog_importaciones', 'importado_en', false),
+      dtmTodo('ind_dtmlog_comentarios', 'creado_en', false)
+    ]);
+    if(r[0].error) throw r[0].error;
+    DTMLOG.cfg = (r[0].data && r[0].data[0]) || { markup_minimo:20, dias_compra_sin_venta:45, dias_venta_sin_compra:60, desde_periodo:'2026-10' };
+    DTMLOG.aud = r[1]; DTMLOG.sosp = r[2]; DTMLOG.unif = r[3]; DTMLOG.imps = r[4]; DTMLOG.coment = r[5];
+    DTMLOG.cargado = true;
+  }catch(e){
+    DTMLOG.error = (e && (e.message || e.hint || e.code)) ? String(e.message || e.hint || e.code) : 'no se pudo leer';
+  }finally{ DTMLOG.cargando = false; }
+}
+
+/* El estado de revisión NO se guarda sobre el contenedor sino sobre la HUELLA
+   del caso. Si después aparece una compra, se corrige un importe o cambia la
+   imputación, la huella deja de coincidir y el caso REABRE solo: la
+   justificación vieja queda en el historial pero ya no lo tapa. */
+function dtmRevision(r){
+  var hoy = todayISO();
+  var propios = DTMLOG.coment.filter(function(c){ return c.caso_clave === r.caso_clave; });
+  var vig = propios.filter(function(c){ return c.huella === r.huella; });
+  var just = vig.filter(function(c){ return c.accion === 'justificar'; })[0];
+  var posp = vig.filter(function(c){ return c.accion === 'posponer' && c.posponer_hasta && c.posponer_hasta > hoy; })[0];
+  var reab = propios.length > 0 && vig.length === 0 && propios.some(function(c){ return c.accion !== 'comentario'; });
+  return { total:propios.length, just:just, posp:posp, reabierto:reab, tapado: !!(just || posp) };
+}
+
+VIEWS.ctrl_dtm = async function(){
+  var accs = (DTMLOG.puedeEditar
+    ? '<button class="btn" onclick="dtmAbrirImportar()">' + ICO.plus + ' Importar informes</button>'
+      + '<button class="btn ghost" onclick="dtmAbrirManual()">Carga manual</button>'
+    : '') + '<button class="btn ghost" onclick="dtmRecargar()">' + ICO.refresh + ' Actualizar</button>';
+  setHeader('Control DTM y Logística', 'Costo contratado contra lo facturado al cliente, por contenedor', accs);
+
+  if(!DTMLOG.cargado && !DTMLOG.error && !DTMLOG.cargando){
+    C().innerHTML = '<div class="card"><div class="card-b"><div class="help" style="padding:20px">Cargando el control…</div></div></div>';
+    await dtmCargar();
+    if(current !== 'ctrl_dtm') return;   // el usuario se fue mientras cargaba
+    return VIEWS.ctrl_dtm();
+  }
+  if(DTMLOG.error){
+    C().innerHTML = '<div class="card"><div class="card-b"><div class="empty" style="padding:40px">'
+      + 'No se pudo leer el control: ' + esc(DTMLOG.error)
+      + '<br><br>Si dice que no existe la relación, falta correr <code>sql/2026-11-12-control-dtm-logistica.sql</code> en Supabase.'
+      + '<div style="margin-top:12px"><button class="btn" onclick="dtmRecargar()">Reintentar</button></div></div></div></div>';
+    return;
+  }
+  C().innerHTML = dtmCabecera() + dtmBarra() + dtmTabla() + dtmSecundarias();
+  var s = document.getElementById('dtmBusq');
+  if(s) s.oninput = function(){
+    DTMLOG.busq = s.value; var p = s.selectionStart; VIEWS.ctrl_dtm();
+    var n = document.getElementById('dtmBusq'); if(n){ n.focus(); n.setSelectionRange(p, p); }
+  };
+};
+function dtmRecargar(){ DTMLOG.cargado = false; DTMLOG.error = ''; VIEWS.ctrl_dtm(); }
+function dtmCorte(origen){
+  var f = DTMLOG.imps.filter(function(i){ return i.origen === origen && i.hasta; }).map(function(i){ return i.hasta; }).sort();
+  return f.length ? f[f.length-1] : null;
+}
+
+function dtmCabecera(){
+  var cc = dtmCorte('compras'), cv = dtmCorte('ventas');
+  var ult = DTMLOG.imps.length ? DTMLOG.imps[0] : null, aviso = '';
+  if(ult && ult.importado_en){
+    var d = Math.floor((Date.now() - new Date(ult.importado_en).getTime()) / 86400000);
+    if(d >= 7) aviso = '<span style="color:#8A6D1F;font-weight:700"> · hace ' + d + ' días que no se importa nada</span>';
+  }
+  var vis = dtmVisibles();
+  var tc = vis.reduce(function(a,r){ return a + (+r.costo_ars || 0); }, 0);
+  var tf = vis.reduce(function(a,r){ return a + (+r.fact_ars  || 0); }, 0);
+  var mk = tc > 0 ? ((tf - tc) / tc) * 100 : null;
+  var min = +DTMLOG.cfg.markup_minimo;
+
+  var conteo = {}; vis.forEach(function(r){ conteo[r.estado] = (conteo[r.estado] || 0) + 1; });
+  var fichas = Object.keys(DTM_ESTADOS).sort(function(a,b){ return DTM_ESTADOS[a].orden - DTM_ESTADOS[b].orden; })
+    .filter(function(e){ return conteo[e]; })
+    .map(function(e){
+      var d = DTM_ESTADOS[e], on = DTMLOG.filtroEstado === e;
+      return '<button onclick="dtmFiltrarEstado(\'' + e + '\')" style="cursor:pointer;text-align:left;border:1px solid;border-radius:10px;padding:8px 12px;min-width:110px;'
+        + DTM_TONOS[d.tono] + (on ? ';box-shadow:0 0 0 2px rgba(95,122,78,.45)' : '') + '">'
+        + '<div style="font-size:20px;font-weight:800;line-height:1">' + conteo[e] + '</div>'
+        + '<div style="font-size:10.5px;font-weight:700;margin-top:2px">' + esc(d.lbl) + '</div></button>';
+    }).join('');
+
+  // La brecha entre las dos fuentes de costo NO es un detalle: con los datos de
+  // octubre 2026 el markup del export da +256,9 % y el mismo grupo con el costo
+  // de la auditoría manual da +19,5 %, o sea veredictos opuestos. Mientras la
+  // brecha exista, el markup calculado solo con el export dice que todo da
+  // ganancia. Por eso va arriba de todo y no escondido en una columna.
+  var conManual = vis.filter(function(r){ return r.costo_manual != null && +r.costo_manual > 0; });
+  var brecha = '';
+  if(conManual.length){
+    var cm = conManual.reduce(function(a,r){ return a + (+r.costo_manual || 0); }, 0);
+    var ce = conManual.reduce(function(a,r){ return a + (+r.costo_dtm || 0); }, 0);
+    var cob = cm > 0 ? (ce / cm) * 100 : null;
+    var nAl = vis.filter(function(r){ return r.alerta_manual; }).length;
+    if(cob != null && cob < 95){
+      brecha = '<div style="margin-top:10px;background:#FCF4E6;border:1px solid #E9D8B0;color:#8A6D1F;border-radius:9px;padding:9px 12px;font-size:12.5px">'
+        + '<strong>El informe de compras de Tango trae el ' + dtmPct(cob).replace('+','') + ' del costo que tiene cargado la auditoría manual.</strong> '
+        + 'Mientras falte el resto, el markup calculado con el export va a dar más alto de lo real.'
+        + (nAl ? ' Hay <strong>' + nAl + '</strong> caso(s) que pasan con el costo del export y NO pasan con el costo real.' : '')
+        + '</div>';
+    }
+  }
+
+  return '<div class="card" style="margin-bottom:12px"><div class="card-b">'
+    + '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:baseline;font-size:12.5px;color:var(--muted);margin-bottom:12px">'
+    +   '<span><strong style="color:#37432c">Último informe</strong> · compras hasta ' + (cc ? fechaDMY(cc) : '—') + ' · ventas hasta ' + (cv ? fechaDMY(cv) : '—') + aviso + '</span>'
+    +   '<span>Costo <strong style="color:#37432c">' + dtmPlata(tc) + '</strong></span>'
+    +   '<span>Facturado <strong style="color:#37432c">' + dtmPlata(tf) + '</strong></span>'
+    +   '<span>Markup <strong style="color:' + (mk != null && mk < min ? '#8E3C34' : '#37432c') + '">' + dtmPct(mk) + '</strong> (mínimo ' + dtmPct(min) + ')</span>'
+    + '</div>'
+    + (fichas ? '<div style="display:flex;flex-wrap:wrap;gap:8px">' + fichas + '</div>'
+              : '<div class="help">Todavía no hay nada importado. Usá «Importar informes» con los cuatro archivos que exporta Tango.</div>')
+    + brecha + '</div></div>';
+}
+function dtmFiltrarEstado(e){ DTMLOG.filtroEstado = (DTMLOG.filtroEstado === e) ? null : e; VIEWS.ctrl_dtm(); }
+function dtmToggleAlertas(){ DTMLOG.soloAlertas = !DTMLOG.soloAlertas; VIEWS.ctrl_dtm(); }
+function dtmLimpiarEstado(){ DTMLOG.filtroEstado = null; DTMLOG.soloAlertas = false; VIEWS.ctrl_dtm(); }
+
+function dtmBarra(){
+  return '<div class="toolbar">'
+    + '<div class="search">' + ICO.search + '<input id="dtmBusq" placeholder="Buscar contenedor, proveedor o comprobante…" value="' + esc(DTMLOG.busq) + '"></div>'
+    + '<div class="filterpills">'
+    +   '<button class="pill ' + (!DTMLOG.soloAlertas && !DTMLOG.filtroEstado ? 'active' : '') + '" onclick="dtmLimpiarEstado()">Todo</button>'
+    +   '<button class="pill ' + (DTMLOG.soloAlertas ? 'active' : '') + '" onclick="dtmToggleAlertas()">Solo lo que alerta</button>'
+    + '</div>'
+    + '<div class="filteracts" style="display:flex;gap:8px;align-items:center">'
+    +   xlfClearBtn('dtmx')
+    +   '<button class="btn ghost" onclick="tblAutofit(\'#tblDtmLog\')">Auto-ajustar columnas</button>'
+    + '</div></div>';
+}
+
+function dtmServicio(r){
+  var hayD = (+r.costo_dtm || +r.fact_dtm), hayL = (+r.costo_log || +r.fact_log);
+  return hayD && hayL ? 'DTM + Logística' : (hayD ? 'DTM' : 'Logística');
+}
+/* Las filas que se ven después de todos los filtros. Se usa también para los
+   totales de arriba, así los números de la cabecera siempre corresponden a lo
+   que se está mirando. */
+function dtmVisibles(){
+  var l = DTMLOG.aud.slice();
+  if(DTMLOG.filtroEstado) l = l.filter(function(r){ return r.estado === DTMLOG.filtroEstado; });
+  if(DTMLOG.soloAlertas)  l = l.filter(function(r){ return (DTM_ESTADOS[r.estado] || {}).alerta || r.alerta_manual; });
+  if(DTMLOG.busq){
+    var q = DTMLOG.busq.toLowerCase();
+    l = l.filter(function(r){
+      return [r.serie_raw, r.serie_norm, r.periodo].concat(r.proveedores || [])
+        .concat(r.comprobantes_compra || []).concat(r.comprobantes_venta || [])
+        .join(' ').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+  if(xlfHasAny('dtmx')) l = l.filter(function(r){ return xlfPass('dtmx', r); });
+  var s = window.dtmSort;
+  var val = function(r){
+    if(s.col === 'estado')  return (DTM_ESTADOS[r.estado] || {orden:99}).orden;
+    if(s.col === 'markup')  return r.markup != null ? +r.markup : (r.markup_cluster != null ? +r.markup_cluster : -1e9);
+    if(s.col === 'costo')   return +r.costo_ars || 0;
+    if(s.col === 'fact')    return +r.fact_ars || 0;
+    if(s.col === 'periodo') return r.periodo || '';
+    if(s.col === 'servicio')return dtmServicio(r);
+    return (r.serie_norm || '').toLowerCase();
+  };
+  l.sort(function(a,b){
+    var x = val(a), y = val(b);
+    if(x < y) return -s.dir; if(x > y) return s.dir;
+    return String(a.serie_norm).localeCompare(String(b.serie_norm), 'es', {numeric:true});
+  });
+  return l;
+}
+
+function dtmTabla(){
+  xlfRegister('dtmx', { rows:function(){ return DTMLOG.aud; }, onChange:function(){ VIEWS.ctrl_dtm(); },
+    val:function(r, col){
+      if(col === 'serie')    return r.serie_norm || '(sin contenedor)';
+      if(col === 'periodo')  return dtmPeriodoLbl(r.periodo);
+      if(col === 'estado')   return (DTM_ESTADOS[r.estado] || {lbl:r.estado}).lbl;
+      if(col === 'servicio') return dtmServicio(r);
+      if(col === 'proveedor')return ((r.proveedores || []).filter(Boolean)[0]) || '(sin proveedor)';
+      return '';
+    } });
+  var l = dtmVisibles();
+  if(!l.length) return '<div class="card">' + emptyState('Sin resultados', 'Probá con otro filtro, o importá los informes de Tango.') + '</div>';
+  var V = 'VIEWS.ctrl_dtm';
+  return '<div class="card"><table class="grid" id="tblDtmLog"><thead><tr>'
+    + sortFilterTh('Contenedor','serie','dtmSort',V,'dtmx','serie')
+    + sortFilterTh('Período','periodo','dtmSort',V,'dtmx','periodo')
+    + sortFilterTh('Servicio','servicio','dtmSort',V,'dtmx','servicio')
+    + sortTh('Costo','costo','dtmSort',V,'r')
+    + sortTh('Facturado','fact','dtmSort',V,'r')
+    + sortTh('Markup','markup','dtmSort',V,'r')
+    + '<th class="r">Markup real</th>'
+    + sortFilterTh('Estado','estado','dtmSort',V,'dtmx','estado')
+    + sortFilterTh('Proveedor','proveedor','dtmSort',V,'dtmx','proveedor')
+    + '<th class="nowrap"></th>'
+    + '</tr></thead><tbody>' + l.map(dtmFila).join('') + '</tbody></table></div>';
+}
+
+function dtmFila(r){
+  var rev = dtmRevision(r), grupo = (+r.cluster_n || 1) > 1;
+  var min = +DTMLOG.cfg.markup_minimo;
+  // Con comprobantes multi-contenedor el markup por contenedor es un artefacto
+  // del reparto de Tango (reparte en partes iguales; la realidad no). Se
+  // muestra el del grupo, que es el nivel donde los números cierran.
+  var mk = grupo ? r.markup_cluster : r.markup;
+  var mkReal = grupo ? r.markup_cluster_manual : r.markup_manual;
+  var bajo = mk != null && +mk < min, bajoReal = mkReal != null && +mkReal < min;
+  var provs = (r.proveedores || []).filter(Boolean);
+  var notas = [];
+  if(grupo) notas.push('<span title="El markup es el del grupo de contenedores que comparten comprobante: el reparto por contenedor que hace Tango no refleja el valor real de cada uno." style="color:#8A6D1F">grupo de ' + (+r.cluster_n) + '</span>');
+  if(r.multi_proveedor) notas.push('<span title="Dos proveedores para el mismo servicio (por ejemplo camión y grúa). No es un error." style="color:var(--muted)">2 proveedores</span>');
+  if(r.cruce_categoria) notas.push('<span title="El costo entró en una categoría y la venta en la otra." style="color:#8A6D1F">cruce DTM/LOG</span>');
+  if(rev.tapado) notas.push('<span style="color:var(--muted)">' + (rev.posp ? 'pospuesto' : 'justificado') + '</span>');
+  if(rev.reabierto) notas.push('<span title="Se había justificado, pero después cambiaron los comprobantes o los importes." style="color:#8E3C34;font-weight:700">reabierto</span>');
+  if(r.cobertura_costo != null && +r.cobertura_costo < 95) notas.push('<span title="Porcentaje del costo que la auditoría manual conoce y que llegó al informe de Tango." style="color:var(--muted)">costo al ' + (+r.cobertura_costo) + ' %</span>');
+
+  return '<tr' + (rev.tapado ? ' style="opacity:.55"' : '') + '>'
+    + '<td class="nowrap"><strong>' + esc(r.serie_raw || r.serie_norm || '—') + '</strong></td>'
+    + '<td class="nowrap">' + dtmPeriodoLbl(r.periodo) + '</td>'
+    + '<td class="nowrap">' + esc(dtmServicio(r)) + '</td>'
+    + '<td class="r nowrap">' + dtmPlata(+r.costo_ars) + '</td>'
+    + '<td class="r nowrap">' + dtmPlata(+r.fact_ars) + '</td>'
+    + '<td class="r nowrap" style="font-weight:700;color:' + (mk == null ? 'var(--muted)' : (bajo ? '#8E3C34' : '#4A6239')) + '">' + dtmPct(mk == null ? null : +mk) + '</td>'
+    + '<td class="r nowrap" style="font-weight:700;color:' + (mkReal == null ? 'var(--muted)' : (bajoReal ? '#8E3C34' : '#4A6239')) + '" title="El mismo markup pero con el costo que tiene cargado la auditoría manual (tab DTM de Indicadores), que hoy conoce más costo que el informe de Tango.">' + dtmPct(mkReal == null ? null : +mkReal) + '</td>'
+    + '<td>' + dtmBadge(r.estado) + (r.alerta_manual ? ' <span title="Con el costo que conoce la auditoría manual no llega al mínimo, aunque con el costo del informe de Tango sí." style="display:inline-block;margin-left:4px;padding:1px 6px;border-radius:999px;border:1px solid #E9D8B0;background:#FCF4E6;color:#8A6D1F;font-size:10px;font-weight:800">con el costo real, no</span>' : '')
+      + (notas.length ? '<div style="font-size:10.5px;margin-top:3px;display:flex;flex-wrap:wrap;gap:6px">' + notas.join('') + '</div>' : '') + '</td>'
+    + '<td>' + (provs.length ? esc(provs.join(', ')) : '<span class="help">—</span>') + '</td>'
+    + '<td class="nowrap"><button class="btn ghost" style="padding:3px 10px;font-size:11.5px" onclick="dtmAbrirCaso(' + dtmArg(r.caso_clave) + ')">Ver' + (rev.total ? ' (' + rev.total + ')' : '') + '</button></td>'
+    + '</tr>';
+}
+/* Un argumento para un onclick inline. Los códigos de contenedor vienen del
+   Excel de Tango, así que no son de confianza: se serializan con JSON y después
+   se escapan como HTML, en vez de concatenar comillas a mano. */
+function dtmArg(v){ return esc(JSON.stringify(String(v == null ? '' : v))); }
+
+function dtmSecundarias(){
+  var h = '';
+  if(DTMLOG.sosp.length){
+    h += '<div class="card" style="margin-top:14px"><div class="card-h"><h3>Comprobantes para mirar (' + DTMLOG.sosp.length + ')</h3></div><div class="card-b" style="padding:0">'
+      + '<table class="grid"><thead><tr><th>Comprobante</th><th>Origen</th><th>Proveedor</th><th>Fecha</th><th class="r">Total</th><th class="r">Desglose</th><th>Qué pasa</th></tr></thead><tbody>'
+      + DTMLOG.sosp.map(function(c){
+          return '<tr><td class="nowrap"><strong>' + esc(c.nro_comprobante || '—') + '</strong></td>'
+            + '<td class="nowrap">' + esc(c.origen === 'compras' ? 'Compra' : 'Venta') + ' ' + esc(c.categoria || '') + '</td>'
+            + '<td>' + esc(c.proveedor || '—') + '</td>'
+            + '<td class="nowrap">' + (c.fecha ? fechaDMY(c.fecha) : '—') + '</td>'
+            + '<td class="r nowrap">' + dtmPlata(Math.abs(+c.total_cte || 0)) + '</td>'
+            + '<td class="r nowrap">' + dtmPlata(Math.abs(+c.suma_renglones || 0)) + '</td>'
+            + '<td>' + (c.problema === 'SIN_DESGLOSE'
+                ? '<span style="color:#8E3C34;font-weight:700">Sin imputar a ningún contenedor</span>'
+                : '<span style="color:#8A6D1F;font-weight:700">El desglose no cierra contra el total</span>') + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+  }
+  if(DTMLOG.unif.length){
+    h += '<div class="card" style="margin-top:14px"><div class="card-h"><h3>Contenedores unificados (' + DTMLOG.unif.length + ')</h3></div><div class="card-b">'
+      + '<div class="help" style="margin-bottom:10px">El mismo contenedor viene escrito distinto en el CRM y en Tango. Se unifican automáticamente; esta lista está para que se vea qué se unificó con qué.</div>'
+      + '<table class="grid"><thead><tr><th>Se cuenta como</th><th>Escrituras que se unificaron</th></tr></thead><tbody>'
+      + DTMLOG.unif.map(function(u){ return '<tr><td class="nowrap"><strong>' + esc(u.serie_norm) + '</strong></td><td>' + esc((u.escrituras || []).join('  ·  ')) + '</td></tr>'; }).join('')
+      + '</tbody></table></div></div>';
+  }
+  if(DTMLOG.imps.length){
+    h += '<div class="card" style="margin-top:14px"><div class="card-h"><h3>Importaciones</h3></div><div class="card-b" style="padding:0">'
+      + '<table class="grid"><thead><tr><th>Archivo</th><th>Qué trajo</th><th>Período</th><th class="r">Filas 02/04</th><th class="r">Movimiento</th><th>Quién y cuándo</th></tr></thead><tbody>'
+      + DTMLOG.imps.slice(0, 25).map(function(i){
+          return '<tr><td>' + esc(i.archivo || '—') + '</td>'
+            + '<td class="nowrap">' + esc(i.origen === 'compras' ? 'Compras' : 'Ventas') + ' ' + esc(i.categoria || '') + '</td>'
+            + '<td class="nowrap">' + (i.desde ? fechaDMY(i.desde) : '—') + ' a ' + (i.hasta ? fechaDMY(i.hasta) : '—') + '</td>'
+            + '<td class="r nowrap">' + (+i.filas_02 || 0) + ' / ' + (+i.filas_04 || 0) + '</td>'
+            + '<td class="r nowrap">' + dtmPlata(Math.abs(+i.total_real || 0)) + (i.cuadra === false ? ' <span title="El total del pie del archivo no dio la suma esperada." style="color:#8A6D1F">⚠</span>' : '') + '</td>'
+            + '<td class="nowrap">' + esc(i.importado_por || '—') + ' · ' + (i.importado_en ? tsDMY(new Date(i.importado_en).getTime()) : '—') + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+  }
+  return h;
+}
+
+/* ---------------- El detalle de un caso ---------------- */
+function dtmAbrirCaso(caso){
+  var r = DTMLOG.aud.filter(function(x){ return x.caso_clave === caso; })[0];
+  if(!r) return;
+  var rev = dtmRevision(r), grupo = (+r.cluster_n || 1) > 1, min = +DTMLOG.cfg.markup_minimo;
+  var mk = grupo ? r.markup_cluster : r.markup;
+  var mkReal = grupo ? r.markup_cluster_manual : r.markup_manual;
+  var fila = function(l, v){ return '<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0"><span style="color:var(--muted)">' + l + '</span><strong>' + v + '</strong></div>'; };
+
+  var resumen = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">'
+    + '<div><div style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:6px">Costo contratado</div>'
+    +   fila('Según Tango', dtmPlata(+r.costo_ars))
+    +   ((+r.costo_dtm || +r.costo_log) ? fila('DTM / Logística', dtmPlata(+r.costo_dtm) + ' / ' + dtmPlata(+r.costo_log)) : '')
+    +   (r.costo_manual != null ? fila('<span title="Lo que tiene cargado la auditoría manual (tab DTM de Indicadores) para el mismo contenedor y mes.">Auditoría manual</span>', dtmPlata(+r.costo_manual)) : '')
+    +   fila('Comprobantes', esc((r.comprobantes_compra || []).join(', ') || '—'))
+    +   fila('Proveedores', esc((r.proveedores || []).join(', ') || '—'))
+    + '</div>'
+    + '<div><div style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:6px">Facturado al cliente</div>'
+    +   fila('Según Tango', dtmPlata(+r.fact_ars))
+    +   ((+r.fact_dtm || +r.fact_log) ? fila('DTM / Logística', dtmPlata(+r.fact_dtm) + ' / ' + dtmPlata(+r.fact_log)) : '')
+    +   (r.fact_manual != null ? fila('Auditoría manual', dtmPlata(+r.fact_manual)) : '')
+    +   fila('Comprobantes', esc((r.comprobantes_venta || []).join(', ') || '—'))
+    + '</div></div>';
+
+  var ver = '<div style="margin-top:14px;border:1px solid var(--line);border-radius:10px;padding:12px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">'
+    +   '<div>' + dtmBadge(r.estado) + '</div>'
+    +   '<div style="text-align:right">'
+    +     '<div style="font-size:18px;font-weight:800;color:' + (mk != null && +mk < min ? '#8E3C34' : '#4A6239') + '">' + dtmPct(mk == null ? null : +mk) + ' <span style="font-size:11px;font-weight:600;color:var(--muted)">con el costo de Tango</span></div>'
+    +     (mkReal != null ? '<div style="font-size:15px;font-weight:800;margin-top:2px;color:' + (+mkReal < min ? '#8E3C34' : '#4A6239') + '">' + dtmPct(+mkReal) + ' <span style="font-size:11px;font-weight:600;color:var(--muted)">con el costo de la auditoría manual</span></div>' : '')
+    +   '</div></div>';
+  if(mk != null){
+    // La distancia en pesos al umbral importa: un caso que se decide por unos
+    // pocos miles no se comunica bien con un semáforo pelado.
+    //
+    // Y se calcula con el costo que MANDA, que es el de la auditoría manual
+    // cuando existe: si no, la pantalla diría "está X por encima del mínimo"
+    // justo arriba del cartel que avisa que con el costo real no llega. Dos
+    // frases que se contradicen en el mismo modal es peor que no decir nada.
+    var usaManual = (grupo ? r.costo_cluster_manual : r.costo_manual) != null
+                 && +(grupo ? r.costo_cluster_manual : r.costo_manual) > 0;
+    var cRef = usaManual ? +(grupo ? r.costo_cluster_manual : r.costo_manual)
+                         : (grupo ? (+r.costo_cluster || 0) : (+r.costo_ars || 0));
+    var fRef = usaManual ? +(grupo ? r.fact_cluster_manual : r.fact_manual) || 0
+                         : (grupo ? (+r.fact_cluster || 0) : (+r.fact_ars || 0));
+    var falta = cRef * (1 + min/100) - fRef;
+    var fuente = usaManual ? 'con el costo de la auditoría manual' : 'con el costo de Tango';
+    ver += '<div style="font-size:12.5px;color:var(--muted);margin-top:8px">'
+      + (falta > 0 ? 'Le faltan <strong style="color:#8E3C34">' + dtmPlata(falta) + '</strong> de facturación para llegar al ' + dtmPct(min)
+                   : 'Está <strong style="color:#4A6239">' + dtmPlata(-falta) + '</strong> por encima del mínimo')
+      + ' <span style="font-size:11px">(' + fuente + ')</span>.</div>';
+  }
+  if(r.alerta_manual){
+    ver += '<div style="font-size:12px;color:#8A6D1F;margin-top:8px;background:#FCF4E6;border-radius:8px;padding:8px 10px">'
+      + '<strong>Con el costo que conoce la auditoría manual, este caso no llega al mínimo.</strong> El informe de compras de Tango todavía no tiene todo el costo, '
+      + 'así que el número de la izquierda está sobrestimado.</div>';
+  }
+  if(grupo){
+    ver += '<div style="font-size:12px;color:#8A6D1F;margin-top:8px;background:#FCF4E6;border-radius:8px;padding:8px 10px">'
+      + 'Este contenedor comparte comprobantes con otros ' + ((+r.cluster_n) - 1) + '. Tango reparte el importe de esos comprobantes en partes iguales, y ese reparto no refleja el valor real de cada uno: '
+      + 'el markup que se muestra es el del <strong>grupo</strong> (' + esc(r.cluster_id || '') + '), que es el nivel donde los números cierran. El markup por contenedor sería un número inventado.</div>';
+  }
+  if(r.estado === 'FALTA_COSTO' || r.estado === 'ESPERANDO_COSTO'){
+    ver += '<div style="font-size:12px;color:var(--muted);margin-top:8px">Hay facturación y no hay costo contabilizado. Si el costo existe pero todavía no entró en el informe de Tango, cargalo con «Carga manual» y el caso se resuelve solo.</div>';
+  }
+  ver += '</div>';
+
+  var hist = DTMLOG.coment.filter(function(c){ return c.caso_clave === r.caso_clave; });
+  var historial = '<div style="margin-top:14px"><div style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:6px">Comentarios</div>';
+  historial += hist.length ? hist.map(function(c){
+    var vig = c.huella === r.huella;
+    var tipo = c.accion === 'justificar' ? 'Justificado — ' + (DTM_MOTIVOS[c.motivo] || c.motivo || '')
+             : c.accion === 'posponer'   ? 'Pospuesto hasta ' + (c.posponer_hasta ? fechaDMY(c.posponer_hasta) : '—')
+             : 'Comentario';
+    return '<div style="border-left:3px solid ' + (vig ? '#9db98b' : '#DCDCD6') + ';padding:6px 10px;margin-bottom:8px;background:#FAFAF7;border-radius:0 8px 8px 0">'
+      + '<div style="font-size:11px;color:var(--muted)"><strong style="color:#37432c">' + esc(tipo) + '</strong> · ' + esc(c.usuario || '') + ' · ' + (c.creado_en ? tsDMY(new Date(c.creado_en).getTime()) : '')
+      + (vig ? '' : ' · <span title="Después de este comentario cambiaron los comprobantes o los importes del caso.">ya no corresponde al caso actual</span>') + '</div>'
+      + '<div style="font-size:12.5px;margin-top:2px;white-space:pre-wrap">' + esc(c.texto || '') + '</div></div>';
+  }).join('') : '<div class="help">Todavía no hay comentarios en este caso.</div>';
+  historial += '</div>';
+
+  var a = dtmArg(caso);
+  var acciones = '<button class="btn ghost" onclick="dtmComentar(' + a + ',\'comentario\')">Comentar</button>'
+    + (DTMLOG.puedeEditar
+        ? '<button class="btn ghost" onclick="dtmComentar(' + a + ',\'posponer\')">Posponer</button>'
+          + '<button class="btn" onclick="dtmComentar(' + a + ',\'justificar\')">Justificar</button>'
+        : '');
+  openModal(String(r.serie_raw || r.serie_norm) + ' · ' + dtmPeriodoLbl(r.periodo, true), resumen + ver + historial,
+    '<button class="btn ghost" onclick="closeModal()">Cerrar</button>' + acciones);
+}
+
+/* Justificar y posponer son DOS cosas distintas a propósito. "Todavía no pasó"
+   se pospone y vuelve solo en una fecha; "esto está explicado" se justifica y
+   vuelve solo si cambia la huella del caso. Si hubiera un solo botón, la gente
+   justificaría cosas que en realidad estaba posponiendo, y ahí sí se taparían
+   problemas. */
+function dtmComentar(caso, accion){
+  var r = DTMLOG.aud.filter(function(x){ return x.caso_clave === caso; })[0];
+  if(!r) return;
+  var titulo = accion === 'justificar' ? 'Justificar el caso' : accion === 'posponer' ? 'Posponer el caso' : 'Comentar';
+  var extra = '';
+  if(accion === 'justificar'){
+    extra = '<div class="fld"><label style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700">Motivo</label>'
+      + '<select id="dtmMotivo" class="inp">' + Object.keys(DTM_MOTIVOS).map(function(k){ return '<option value="' + k + '">' + esc(DTM_MOTIVOS[k]) + '</option>'; }).join('') + '</select>'
+      + '<div class="help" style="margin-top:4px">El motivo sale de una lista corta a propósito: así después se puede medir cuál se repite y con qué proveedor, que es lo que arregla el problema de fondo.</div></div>';
+  }
+  if(accion === 'posponer'){
+    var d = new Date(Date.now() + 30*86400000);
+    var def = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    extra = '<div class="fld"><label style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700">Volver a mostrarlo el</label>'
+      + '<input type="date" id="dtmHasta" class="inp" value="' + def + '" min="' + todayISO() + '"></div>';
+  }
+  openModal(titulo,
+    '<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">' + esc(String(r.serie_raw || r.serie_norm)) + ' · ' + dtmPeriodoLbl(r.periodo, true) + '</div>' + extra
+    + '<div class="fld" style="margin-top:10px"><label style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700">Comentario</label>'
+    + '<textarea id="dtmTexto" class="inp" rows="3" placeholder="Qué pasó con este caso"></textarea></div>'
+    + (accion !== 'comentario' ? '<div class="help" style="margin-top:8px">'
+        + (accion === 'justificar'
+            ? 'Si después aparece una compra, se corrige un importe o cambia la imputación, el caso vuelve a abrirse solo y este comentario queda en el historial.'
+            : 'El caso se oculta hasta esa fecha y vuelve solo. Si mientras tanto cambian los comprobantes, vuelve antes.') + '</div>' : ''),
+    '<button class="btn ghost" onclick="dtmAbrirCaso(' + dtmArg(caso) + ')">Volver</button>'
+    + '<button class="btn" id="dtmBtnGuardar" onclick="dtmGuardarComentario(' + dtmArg(caso) + ',\'' + accion + '\')">Guardar</button>');
+}
+
+async function dtmGuardarComentario(caso, accion){
+  var r = DTMLOG.aud.filter(function(x){ return x.caso_clave === caso; })[0];
+  if(!r) return;
+  var texto = (document.getElementById('dtmTexto').value || '').trim();
+  if(!texto){ toast('El comentario es obligatorio.'); return; }
+  var f = { caso_clave:r.caso_clave, huella:r.huella, accion:accion, texto:texto, usuario:dtmUsuario(),
+            motivo: accion === 'justificar' ? document.getElementById('dtmMotivo').value : null,
+            posponer_hasta: accion === 'posponer' ? (document.getElementById('dtmHasta').value || null) : null };
+  if(accion === 'posponer' && !f.posponer_hasta){ toast('Elegí hasta cuándo posponerlo.'); return; }
+  var b = document.getElementById('dtmBtnGuardar'); if(b){ b.disabled = true; b.textContent = 'Guardando…'; }
+  try{
+    var res = await sbClient.from('ind_dtmlog_comentarios').insert(f);
+    if(res.error) throw res.error;
+    toast('Guardado'); closeModal();
+    DTMLOG.cargado = false; await VIEWS.ctrl_dtm();
+  }catch(e){
+    if(b){ b.disabled = false; b.textContent = 'Guardar'; }
+    toast('No se pudo guardar: ' + (e.message || e));
+  }
+}
+
+/* ---------------- Importar los informes de Tango ----------------
+   Un solo botón, sin ranuras: se eligen los cuatro archivos (o los que haya) y
+   el parser clasifica FILA POR FILA por Cód. cuenta. Así "subí el archivo
+   equivocado" no existe por construcción. */
+function dtmAbrirImportar(){
+  DTMLOG.previo = null;
+  openModal('Importar informes de Tango',
+    '<div class="help" style="margin-bottom:10px">Elegí los informes de mayor por auxiliar que exporta Tango (Compras DTM, Compras Logística, Ventas DTM y Ventas Logística). '
+    + 'Se pueden subir todos juntos o de a uno: cada fila se clasifica por su código de cuenta, no por el nombre del archivo.</div>'
+    + '<input type="file" id="dtmFiles" class="inp" accept=".xlsx,.xls" multiple onchange="dtmLeerArchivos()">'
+    + '<div id="dtmPreview" style="margin-top:12px"></div>',
+    '<button class="btn ghost" onclick="closeModal()">Cancelar</button>'
+    + '<button class="btn" id="dtmBtnImportar" disabled onclick="dtmConfirmarImportar()">Importar</button>');
+}
+
+async function dtmLeerArchivos(){
+  var input = document.getElementById('dtmFiles');
+  var prev = document.getElementById('dtmPreview');
+  var btn = document.getElementById('dtmBtnImportar');
+  if(!input || !input.files || !input.files.length) return;
+  prev.innerHTML = '<div class="help">Leyendo…</div>';
+  var res = [];
+  for(var i = 0; i < input.files.length; i++){
+    var f = input.files[i];
+    try{
+      var buf = await f.arrayBuffer();
+      res.push(dtmParse(XLSX.read(new Uint8Array(buf), { type:'array' }), XLSX, f.name));
+    }catch(e){
+      res.push({ ok:false, archivo:f.name, error:'No pude abrir el archivo: ' + (e.message || e), avisos:[], importaciones:[], comprobantes:[], renglones:[], unificaciones:[] });
+    }
+  }
+  DTMLOG.previo = res;
+  var buenos = res.filter(function(x){ return x.ok; });
+  var avisos = res.reduce(function(a,x){ return a.concat((x.avisos || []).map(function(m){ return x.archivo + ': ' + m; })); }, []);
+  var unif = res.reduce(function(a,x){ return a.concat(x.unificaciones || []); }, []);
+
+  var h = '<table class="grid"><thead><tr><th>Archivo</th><th>Qué trae</th><th>Período</th><th class="r">02 / 04</th><th class="r">Movimiento real</th><th>Control</th></tr></thead><tbody>';
+  res.forEach(function(x){
+    if(!x.ok){
+      h += '<tr><td>' + esc(x.archivo) + '</td><td colspan="5" style="color:#8E3C34">' + esc(x.error || 'No se pudo leer') + '</td></tr>';
+      return;
+    }
+    x.importaciones.forEach(function(im){
+      h += '<tr><td>' + esc(x.archivo) + '</td>'
+        + '<td class="nowrap">' + esc(im.origen === 'compras' ? 'Compras' : 'Ventas') + ' ' + esc(im.categoria) + ' <span class="help">(' + esc(im.cod_cuenta) + ')</span></td>'
+        + '<td class="nowrap">' + (im.desde ? fechaDMY(im.desde) : '—') + ' a ' + (im.hasta ? fechaDMY(im.hasta) : '—') + '</td>'
+        + '<td class="r nowrap">' + im.filas_02 + ' / ' + im.filas_04 + '</td>'
+        + '<td class="r nowrap">' + dtmPlata(Math.abs(im.total_real)) + '</td>'
+        + '<td class="nowrap">' + (im.cuadra
+            ? '<span style="color:#4A6239">cuadra</span>'
+            : '<span style="color:#8A6D1F;font-weight:700">el total del archivo no cierra</span>') + '</td></tr>';
+    });
+  });
+  h += '</tbody></table>';
+  // El pie de estos informes vale el DOBLE del movimiento (suma los 02 y otra
+  // vez los 04). Decirlo acá evita que alguien compare el número de la pantalla
+  // contra el del Excel y crea que falta la mitad.
+  if(buenos.length) h += '<div class="help" style="margin-top:8px">El total que trae el pie de estos informes vale el doble del movimiento real, porque suma las filas de cuenta y otra vez su desglose. Acá se muestra el movimiento real.</div>';
+  if(unif.length){
+    h += '<div style="margin-top:10px;background:#F0F0EE;border-radius:8px;padding:8px 10px;font-size:12px">'
+      + '<strong>Contenedores escritos de más de una forma, que se van a unificar:</strong><br>'
+      + unif.map(function(u){ return esc(u.escrituras.join(' = ')) + ' → <strong>' + esc(u.serie_norm) + '</strong>'; }).join('<br>') + '</div>';
+  }
+  if(avisos.length){
+    h += '<div style="margin-top:10px;background:#FCF4E6;border:1px solid #E9D8B0;color:#8A6D1F;border-radius:8px;padding:8px 10px;font-size:12px">'
+      + '<strong>' + avisos.length + ' aviso(s):</strong><ul style="margin:6px 0 0 16px;padding:0">'
+      + avisos.slice(0, 12).map(function(m){ return '<li>' + esc(m) + '</li>'; }).join('')
+      + (avisos.length > 12 ? '<li>…y ' + (avisos.length - 12) + ' más</li>' : '') + '</ul></div>';
+  }
+  prev.innerHTML = h;
+  if(btn) btn.disabled = !buenos.length;
+}
+
+async function dtmConfirmarImportar(){
+  var res = (DTMLOG.previo || []).filter(function(x){ return x.ok; });
+  if(!res.length) return;
+  var btn = document.getElementById('dtmBtnImportar');
+  if(btn){ btn.disabled = true; btn.textContent = 'Importando…'; }
+  var usuario = dtmUsuario(), nC = 0, nR = 0;
+  try{
+    for(var i = 0; i < res.length; i++){
+      var arch = res[i];
+      for(var j = 0; j < arch.importaciones.length; j++){
+        var im = arch.importaciones[j];
+        var ins = await sbClient.from('ind_dtmlog_importaciones').insert({
+          archivo:im.archivo, origen:im.origen, categoria:im.categoria, cod_cuenta:im.cod_cuenta,
+          desde:im.desde, hasta:im.hasta, filas_02:im.filas_02, filas_04:im.filas_04,
+          total_declarado:im.total_declarado, total_real:im.total_real, cuadra:im.cuadra,
+          importado_por:usuario }).select('id');
+        if(ins.error) throw ins.error;
+        var impId = ins.data[0].id;
+
+        var cbtes = arch.comprobantes.filter(function(c){ return c.cod_cuenta === im.cod_cuenta; });
+        if(!cbtes.length) continue;
+        var payload = cbtes.map(function(c){
+          return { importacion_id:impId, origen:c.origen, categoria:c.categoria, cod_cuenta:c.cod_cuenta,
+            desc_cuenta:c.desc_cuenta, proveedor:c.proveedor, tipo_comprobante:c.tipo_comprobante,
+            nro_comprobante:c.nro_comprobante, fecha:c.fecha, periodo:c.periodo,
+            total_cte:c.total_cte, total_ext:c.total_ext, cargado_por:usuario };
+        });
+        // El upsert va sobre la clave natural, que INCLUYE la cuenta: sin ella
+        // A0001000000384 se pisa a sí mismo (es la factura que vende Logística
+        // y DTM juntas) y se pierden 4.330.000.
+        var up = await sbClient.from('ind_dtmlog_comprobantes')
+          .upsert(payload, { onConflict:'origen,proveedor_k,nro_comprobante,cod_cuenta' })
+          .select('id,origen,proveedor,nro_comprobante,cod_cuenta');
+        if(up.error) throw up.error;
+        nC += up.data.length;
+
+        var ids = {};
+        up.data.forEach(function(c){ ids[c.origen + '|' + (c.proveedor || '') + '|' + c.nro_comprobante + '|' + c.cod_cuenta] = c.id; });
+        var rens = arch.renglones.filter(function(x){ return x.cod_cuenta === im.cod_cuenta && ids[x._clave_cbte]; })
+          .map(function(x){
+            return { comprobante_id:ids[x._clave_cbte], auxiliar:x.auxiliar, serie_raw:x.serie_raw,
+              leyenda:x.leyenda, importe_cte:x.importe_cte, importe_ext:x.importe_ext, cargado_por:usuario };
+          });
+        if(rens.length){
+          var ur = await sbClient.from('ind_dtmlog_renglones')
+            .upsert(rens, { onConflict:'comprobante_id,auxiliar,leyenda_k' }).select('id');
+          if(ur.error) throw ur.error;
+          nR += ur.data.length;
+        }
+      }
+    }
+    toast('Importado: ' + nC + ' comprobantes y ' + nR + ' renglones.');
+    closeModal();
+    DTMLOG.previo = null; DTMLOG.cargado = false;
+    await VIEWS.ctrl_dtm();
+  }catch(e){
+    if(btn){ btn.disabled = false; btn.textContent = 'Importar'; }
+    toast('No se pudo importar: ' + (e.message || e));
+  }
+}
+
+/* ---------------- Carga manual ----------------
+   Es la salida para los casos en que el costo existe pero todavía no está
+   contabilizado en Tango. Deja asentado QUIÉN lo cargó y CUÁNDO (sale del JWT,
+   no se tipea) y exige un comentario: sin eso, dentro de tres meses nadie va a
+   saber de dónde salió el número. */
+function dtmAbrirManual(){
+  var hoy = todayISO();
+  var lbl = function(t){ return '<label style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700">' + t + '</label>'; };
+  openModal('Carga manual',
+    '<div class="help" style="margin-bottom:12px">Para un costo o una facturación que todavía no está en el informe de Tango. Queda marcado como carga manual, con tu usuario y la fecha.</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    + '<div class="fld">' + lbl('Contenedor') + '<input id="dmSerie" class="inp" placeholder="Ej: ZCSU 511065-4"></div>'
+    + '<div class="fld">' + lbl('Fecha') + '<input type="date" id="dmFecha" class="inp" value="' + hoy + '"></div>'
+    + '<div class="fld">' + lbl('Qué es') + '<select id="dmOrigen" class="inp"><option value="compras">Costo (compra a un proveedor)</option><option value="ventas">Facturación al cliente</option></select></div>'
+    + '<div class="fld">' + lbl('Servicio') + '<select id="dmCat" class="inp"><option value="DTM">DTM</option><option value="LOG">Logística</option></select></div>'
+    + '<div class="fld">' + lbl('Proveedor o cliente') + '<input id="dmProv" class="inp" placeholder="Ej: OFIC3"></div>'
+    + '<div class="fld">' + lbl('Nro. de comprobante u OC') + '<input id="dmNro" class="inp" placeholder="Ej: OC-1234"></div>'
+    + '<div class="fld">' + lbl('Importe (ARS)') + '<input id="dmImporte" class="inp" placeholder="Ej: 1.380.000,00"></div>'
+    + '<div class="fld">' + lbl('Importe (USD, opcional)') + '<input id="dmImporteUsd" class="inp"></div>'
+    + '</div>'
+    + '<div class="fld" style="margin-top:4px">' + lbl('Comentario (obligatorio)')
+    + '<textarea id="dmComent" class="inp" rows="2" placeholder="De dónde sale este número y por qué no está en Tango"></textarea></div>'
+    + '<div id="dmAviso" class="help" style="margin-top:8px"></div>',
+    '<button class="btn ghost" onclick="closeModal()">Cancelar</button>'
+    + '<button class="btn" id="dmBtn" onclick="dtmGuardarManual()">Guardar</button>');
+  var s = document.getElementById('dmSerie');
+  if(s) s.oninput = function(){
+    var n = dtmNormSerie(s.value);
+    var a = document.getElementById('dmAviso');
+    if(a) a.innerHTML = n && n !== s.value.trim().toUpperCase()
+      ? 'Se va a contar como <strong>' + esc(n) + '</strong>.' : '';
+  };
+}
+
+async function dtmGuardarManual(){
+  var g = function(id){ var e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  var serie = g('dmSerie'), norm = dtmNormSerie(serie);
+  var fecha = g('dmFecha'), origen = g('dmOrigen'), cat = g('dmCat');
+  var prov = g('dmProv'), nro = g('dmNro'), coment = g('dmComent');
+  var imp = dtmNum(g('dmImporte')), impUsd = dtmNum(g('dmImporteUsd'));
+  if(!norm)            { toast('Falta el contenedor.'); return; }
+  if(!fecha)           { toast('Falta la fecha.'); return; }
+  if(!nro)             { toast('Falta el número de comprobante u OC.'); return; }
+  if(isNaN(imp) || !imp){ toast('El importe no se entiende o está en cero.'); return; }
+  if(!coment)          { toast('El comentario es obligatorio.'); return; }
+  // Tango exporta las ventas en negativo y las compras en positivo. La carga
+  // manual se tipea en positivo, así que acá se le pone el signo que le
+  // corresponde: si no, una venta cargada a mano RESTARÍA facturación.
+  var signo = origen === 'ventas' ? -1 : 1;
+  var usuario = dtmUsuario();
+  var b = document.getElementById('dmBtn'); if(b){ b.disabled = true; b.textContent = 'Guardando…'; }
+  try{
+    var ins = await sbClient.from('ind_dtmlog_importaciones').insert({
+      archivo:'(carga manual)', origen:origen, categoria:cat, cod_cuenta:'manual',
+      desde:fecha, hasta:fecha, filas_02:1, filas_04:1,
+      total_declarado:null, total_real:Math.abs(imp)*signo, cuadra:true, importado_por:usuario }).select('id');
+    if(ins.error) throw ins.error;
+    var cb = await sbClient.from('ind_dtmlog_comprobantes').upsert({
+      importacion_id:ins.data[0].id, origen:origen, categoria:cat, cod_cuenta:'manual',
+      desc_cuenta:'Carga manual', proveedor:prov || null, tipo_comprobante:'MANUAL',
+      nro_comprobante:nro, fecha:fecha, periodo:fecha.slice(0,7),
+      total_cte:Math.abs(imp)*signo, total_ext:isNaN(impUsd) ? null : Math.abs(impUsd)*signo,
+      fuente:'manual', cargado_por:usuario
+    }, { onConflict:'origen,proveedor_k,nro_comprobante,cod_cuenta' }).select('id');
+    if(cb.error) throw cb.error;
+    var rg = await sbClient.from('ind_dtmlog_renglones').upsert({
+      comprobante_id:cb.data[0].id, auxiliar:'MANUAL', serie_raw:serie, leyenda:null,
+      importe_cte:Math.abs(imp)*signo, importe_ext:isNaN(impUsd) ? null : Math.abs(impUsd)*signo,
+      fuente:'manual', comentario:coment, cargado_por:usuario
+    }, { onConflict:'comprobante_id,auxiliar,leyenda_k' }).select('id');
+    if(rg.error) throw rg.error;
+    toast('Cargado.'); closeModal();
+    DTMLOG.cargado = false; await VIEWS.ctrl_dtm();
+  }catch(e){
+    if(b){ b.disabled = false; b.textContent = 'Guardar'; }
+    toast('No se pudo guardar: ' + (e.message || e));
+  }
+}
+</script>
+<script>
 /* ===================== INDICADORES (vista integrada) =====================
  * Portado de la app rental-dashboard. TODO corre dentro de este IIFE: no
  * se define ni un global nuevo salvo window.IND, que es lo unico que los
@@ -7415,7 +8457,7 @@ const sb = sbClient;
 // Sube de a uno en cada publicación, igual que el caché del service worker.
 // Se muestra abajo de todo en Datos para poder confirmar qué versión se está
 // viendo sin tener que adivinar si el navegador quedó con una copia vieja.
-const APP_VER=33;
+const APP_VER=34;
 
 const DTM_SEED=[
   {mes:'2026-01',serie:'FSCU 402701-4',modelo:'NQ MODULOS',tipo:'DTM',desc:'Reparación cerradura e instalación termotanque',costo:764099.0,fact:648000.0},
