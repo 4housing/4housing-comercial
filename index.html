@@ -9705,6 +9705,11 @@ async function exportarStock(){
   }finally{ if(btn) btn.disabled=false; }
 }
 
+// Los chips llaman a esto desde el onclick inline. Asignar `stkFiltro=...`
+// directo en el onclick no sirve: el handler corre en el scope global y
+// crea window.stkFiltro, no toca la variable de este IIFE.
+function setStkFiltro(v){ stkFiltro=v; renderStockLista(); }
+
 function renderStockLista(){
   const cont=document.getElementById('stock-lista');
   if(!cont) return;
@@ -9712,9 +9717,9 @@ function renderStockLista(){
   const incompletos=STOCK_ITEMS.filter(x=>x.estado==='ALQUILER'&&!(Number(x.importe_mensual)>0)).length;
   const raros=STOCK_ITEMS.filter(x=>x.estado==='ALQUILER'&&importeSospechoso(x.moneda,x.importe_mensual)).length;
   if(chips) chips.innerHTML=[['','Todos'],...ESTADOS.map(e=>[e,e[0]+e.slice(1).toLowerCase()])]
-    .map(([v,l])=>`<button class="stk-chip ${stkFiltro===v?'active':''}" onclick="stkFiltro='${v}';IND.renderStockLista()">${l}${v?` ${STOCK_ITEMS.filter(x=>x.estado===v).length}`:''}</button>`).join('')
-    + (incompletos?`<button class="stk-chip ${stkFiltro==='_falta'?'active':''}" style="border-color:#f59e0b;color:${stkFiltro==='_falta'?'#fff':'#92400e'};${stkFiltro==='_falta'?'background:#f59e0b':''}" onclick="stkFiltro='_falta';IND.renderStockLista()">⚠ Sin importe ${incompletos}</button>`:'')
-    + (raros?`<button class="stk-chip ${stkFiltro==='_raro'?'active':''}" style="border-color:#ef4444;color:${stkFiltro==='_raro'?'#fff':'#b91c1c'};${stkFiltro==='_raro'?'background:#ef4444':''}" onclick="stkFiltro='_raro';IND.renderStockLista()">⚠ Revisar importe ${raros}</button>`:'');
+    .map(([v,l])=>`<button class="stk-chip ${stkFiltro===v?'active':''}" onclick="IND.setStkFiltro('${v}')">${l}${v?` ${STOCK_ITEMS.filter(x=>x.estado===v).length}`:''}</button>`).join('')
+    + (incompletos?`<button class="stk-chip ${stkFiltro==='_falta'?'active':''}" style="border-color:#f59e0b;color:${stkFiltro==='_falta'?'#fff':'#92400e'};${stkFiltro==='_falta'?'background:#f59e0b':''}" onclick="IND.setStkFiltro('_falta')">⚠ Sin importe ${incompletos}</button>`:'')
+    + (raros?`<button class="stk-chip ${stkFiltro==='_raro'?'active':''}" style="border-color:#ef4444;color:${stkFiltro==='_raro'?'#fff':'#b91c1c'};${stkFiltro==='_raro'?'background:#ef4444':''}" onclick="IND.setStkFiltro('_raro')">⚠ Revisar importe ${raros}</button>`:'');
   const d=stockFiltrado();
   if(!d.length){ cont.innerHTML='<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">Sin resultados</div>'; return; }
   const money=x=>{
@@ -11478,6 +11483,7 @@ window.IND = {
     markRead: markRead,
     refrescarSimbolo: refrescarSimbolo,
     renderStockLista: renderStockLista,
+    setStkFiltro: setStkFiltro,
     repcontAbrir: repcontAbrir,
     repcontBuscarTC: rcBuscarTC,
     repcontCambiarMes: repcontCambiarMes,
